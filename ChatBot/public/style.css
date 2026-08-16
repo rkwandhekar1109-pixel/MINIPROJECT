@@ -1,4 +1,4 @@
- body {
+ /* body {
   margin: 0;
   font-family: Arial;
   background: #0f1225;
@@ -10,7 +10,7 @@
 }
 
 /* CHAT CONTAINER */
-.chat-container {
+/* .chat-container {
   width: 400px;
   height: 600px;
   background: #151935;
@@ -27,7 +27,7 @@ h2 {
   margin: 0;
 }
 
-/* CHAT BOX */
+ 
 #chat-box {
   flex: 1;
   padding: 10px;
@@ -37,7 +37,7 @@ h2 {
   scroll-behavior: smooth;
 }
 
-/* MESSAGE */
+ 
 .message {
   padding: 10px 14px;
   margin: 8px;
@@ -48,28 +48,26 @@ h2 {
   animation: fadeIn 0.3s ease;
 }
 
-/* USER MESSAGE */
-.user {
+ .user {
   background: linear-gradient(135deg, #ff0080, #ff4d4d);
   align-self: flex-end;
 }
 
-/* BOT MESSAGE */
+ 
 .bot {
   background: #1c1f3a;
   white-space: pre-wrap;
   word-break: break-word;
   box-shadow: 0 0 10px rgba(255, 0, 150, 0.3);
 }
-
-/* IMAGE (when you add via JS later) */
+ 
 .chat-img {
   max-width: 200px;
   border-radius: 10px;
   margin-top: 5px;
 }
 
-/* INPUT AREA */
+ 
 .input-area {
   display: flex;
   align-items: center;
@@ -78,7 +76,7 @@ h2 {
   background: #0f1225;
 }
 
-/* TEXT INPUT */
+ 
 .input-area input[type="text"] {
   flex: 1;
   padding: 14px 20px;
@@ -92,7 +90,7 @@ h2 {
   box-shadow: 0 0 12px rgba(255, 0, 150, 0.5);
 }
 
-/* ICON BUTTONS */
+ 
 .icon-btn {
   width: 50px;
   height: 50px;
@@ -112,18 +110,17 @@ h2 {
   transition: 0.3s;
 }
 
-/* Hover */
+ 
 .icon-btn:hover {
   transform: scale(1.1);
   box-shadow: 0 0 18px rgba(255, 0, 150, 1);
 }
 
-/* Upload button slightly different */
+ 
 label.icon-btn {
   background: #1c1f3a;
 }
-
-/* ANIMATION */
+ 
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -154,7 +151,7 @@ label.icon-btn {
   height: 20px;
 }
 
-/* each dot */
+ 
 .jump-dots span {
   width: 8px;
   height: 8px;
@@ -164,7 +161,7 @@ label.icon-btn {
   animation: jump 0.8s infinite ease-in-out;
 }
 
-/* delay for wave effect */
+ 
 .jump-dots span:nth-child(2) {
   animation-delay: 0.15s;
 }
@@ -173,7 +170,7 @@ label.icon-btn {
   animation-delay: 0.3s;
 }
 
-/* vertical jump animation */
+ 
 @keyframes jump {
   0% {
     transform: translateY(0);
@@ -189,5 +186,278 @@ label.icon-btn {
   }
   100% {
     transform: translateY(0);
+  }
+} */ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #0f1225;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  color: white;
+  overflow: hidden;
+}
+
+/* CHAT CONTAINER */
+.chat-container {
+  width: 400px;
+  max-width: calc(100vw - 20px);
+  height: 600px;
+  max-height: calc(100dvh - 20px);
+  background: #151935;
+  border-radius: 20px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 0 40px rgba(255, 0, 150, 0.4);
+}
+
+h2 {
+  text-align: center;
+  padding: 10px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+/* CHAT BOX */
+#chat-box {
+  flex: 1;
+  min-height: 0;
+  padding: 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  scroll-behavior: smooth;
+}
+
+/* MESSAGE */
+.message {
+  padding: 10px 14px;
+  margin: 8px;
+  border-radius: 15px;
+  max-width: 75%;
+  font-size: 14px;
+  line-height: 1.5;
+  animation: fadeIn 0.3s ease;
+  overflow-wrap: anywhere;
+}
+
+/* USER */
+.user {
+  background: linear-gradient(135deg, #ff0080, #ff4d4d);
+  align-self: flex-end;
+}
+
+/* BOT */
+.bot {
+  background: #1c1f3a;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: 0 0 10px rgba(255, 0, 150, 0.3);
+}
+
+/* IMAGE */
+.chat-img {
+  max-width: 200px;
+  width: 100%;
+  border-radius: 10px;
+  margin-top: 5px;
+}
+
+/* INPUT AREA */
+.input-area {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #0f1225;
+  flex-shrink: 0;
+}
+
+/* TEXT INPUT */
+.input-area input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 30px;
+  border: none;
+  outline: none;
+  background: #000;
+  color: #fff;
+  font-size: 15px;
+  box-shadow: 0 0 12px rgba(255, 0, 150, 0.5);
+}
+
+/* BUTTON */
+.icon-btn {
+  width: 50px;
+  height: 50px;
+  min-width: 50px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #000;
+  color: white;
+
+  box-shadow: 0 0 10px rgba(255, 0, 150, 0.6);
+  transition: 0.3s;
+}
+
+.icon-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 18px rgba(255, 0, 150, 1);
+}
+
+label.icon-btn {
+  background: #1c1f3a;
+}
+
+/* ANIMATION */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* BOT MESSAGE */
+.message.bot {
+  background: #1f2937;
+  color: #e5e7eb;
+  margin-right: auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* TYPING DOTS */
+.jump-dots {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  height: 20px;
+}
+
+.jump-dots span {
+  width: 8px;
+  height: 8px;
+  background: #9ca3af;
+  border-radius: 50%;
+  display: inline-block;
+  animation: jump 0.8s infinite ease-in-out;
+}
+
+.jump-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.jump-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes jump {
+  0% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+
+  60% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+
+  100% {
+    transform: translateY(0);
+  }
+}
+
+
+/* =========================
+   MOBILE RESPONSIVE
+   ========================= */
+
+@media (max-width: 600px) {
+
+  body {
+    padding: 10px;
+  }
+
+  .chat-container {
+    width: 100%;
+    max-width: 100%;
+    height: calc(100dvh - 20px);
+    max-height: none;
+    border-radius: 16px;
+  }
+
+  h2 {
+    font-size: 20px;
+    padding: 12px 8px;
+  }
+
+  #chat-box {
+    padding: 8px;
+  }
+
+  .message {
+    max-width: 85%;
+    margin: 6px;
+    font-size: 14px;
+  }
+
+  .input-area {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .input-area input[type="text"] {
+    padding: 12px 15px;
+    font-size: 14px;
+  }
+
+  .icon-btn {
+    width: 45px;
+    height: 45px;
+    min-width: 45px;
   }
 }
