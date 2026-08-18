@@ -76,7 +76,17 @@ router.post('/api/auth/signup', async (req, res) => {
     });
   } catch (error) {
     console.error('Signup error:', error);
-    return res.status(500).json({ error: 'Internal server error during registration.' });
+    if (error.code === 11000) {
+      return res.status(400).json({ error: 'An account with this email already exists.' });
+    }
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(val => val.message);
+      return res.status(400).json({ error: messages.join(', ') });
+    }
+    if (error.name === 'MongooseServerSelectionError' || error.name === 'MongoTimeoutError') {
+      return res.status(500).json({ error: 'Database connection failed. Please ensure your MongoDB Atlas IP whitelist includes 0.0.0.0/0 (Allow from anywhere).' });
+    }
+    return res.status(500).json({ error: error.message || 'Registration failed.' });
   }
 });
 
@@ -113,7 +123,10 @@ router.post('/api/auth/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    return res.status(500).json({ error: 'Internal server error during login.' });
+    if (error.name === 'MongooseServerSelectionError' || error.name === 'MongoTimeoutError') {
+      return res.status(500).json({ error: 'Database connection failed. Please ensure your MongoDB Atlas IP whitelist includes 0.0.0.0/0 (Allow from anywhere).' });
+    }
+    return res.status(500).json({ error: error.message || 'Login failed.' });
   }
 });
 
