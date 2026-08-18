@@ -364,6 +364,7 @@
       if (loginEmailVal) {
         document.getElementById('forgot-email').value = loginEmailVal;
       }
+      document.getElementById('forgot-email').focus();
       lucide.createIcons();
     }
 
@@ -400,6 +401,7 @@
           document.getElementById('forgot-step2-form').classList.remove('hidden');
           showAlert(data.message || '4-digit OTP generated! Check screen/email.', 'success');
           document.getElementById('otp-input').value = data.otp || '';
+          document.getElementById('otp-input').focus();
         }
       } catch (err) {
         showAlert('Network error. Could not reach server.');
@@ -437,6 +439,7 @@
           document.getElementById('auth-tabs').classList.add('hidden');
           document.getElementById('forgot-step3-form').classList.remove('hidden');
           showAlert('OTP verified! Please create your new password.', 'success');
+          document.getElementById('new-password').focus();
         }
       } catch (err) {
         showAlert('Network error. Could not verify OTP.');
@@ -485,13 +488,14 @@
         if (!res.ok || !data.success) {
           showAlert(data.error || 'Failed to update password.');
         } else {
-          showAlert('Password updated successfully! Please log in.', 'success');
+          showAlert('Password updated successfully! Redirecting to login...', 'success');
           setTimeout(() => {
             switchAuthMode('login');
             document.getElementById('login-email').value = recoveryEmail;
             document.getElementById('login-password').value = '';
+            document.getElementById('login-password').focus();
             showAlert('Password reset successful! You can now log in.', 'success');
-          }, 1200);
+          }, 1000);
         }
       } catch (err) {
         showAlert('Network error. Could not reset password.');
