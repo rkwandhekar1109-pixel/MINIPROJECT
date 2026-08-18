@@ -65,12 +65,10 @@ async function callGeminiAI(userMsg, uploadedFile) {
 
   const candidateModels = [
     process.env.GEMINI_MODEL,
-    'gemini-3.6-flash',
     'gemini-3.5-flash',
-    'gemini-3.0-flash',
-    'gemini-2.5-flash',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-pro-latest'
+    'gemini-3.5-pro',
+    'gemini-3.6-flash',
+    'gemini-3.0-flash'
   ].filter(Boolean);
 
   // Try using @google/genai SDK first
