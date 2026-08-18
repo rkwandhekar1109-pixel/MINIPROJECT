@@ -99,18 +99,15 @@ async function callGeminiAI(userMsg, uploadedFile) {
 
       const response = await ai.models.generateContent({
         model: modelName,
-        contents: contents,
-        config: {
-          systemInstruction: 'You are an intelligent, helpful, and friendly AI assistant. Provide clear, well-structured answers.'
-        }
+        contents: contents
       });
 
       if (response && response.text) {
         return response.text;
       }
     } catch (sdkError) {
-      lastError = sdkError;
       console.warn(`@google/genai failed with model ${modelName}:`, sdkError.message);
+      lastError = sdkError;
     }
   }
 
@@ -120,6 +117,7 @@ async function callGeminiAI(userMsg, uploadedFile) {
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ model: modelName });
 
+      let result;
       if (uploadedFile && fs.existsSync(uploadedFile.path)) {
         const fileBuffer = fs.readFileSync(uploadedFile.path);
         const imagePart = {
@@ -128,22 +126,138 @@ async function callGeminiAI(userMsg, uploadedFile) {
             mimeType: uploadedFile.mimetype
           }
         };
-        const result = await model.generateContent([promptText, imagePart]);
-        const response = await result.response;
-        return response.text();
+        result = await model.generateContent([promptText, imagePart]);
       } else {
-        const result = await model.generateContent(promptText);
-        const response = await result.response;
-        return response.text();
+        result = await model.generateContent(promptText);
       }
-    } catch (fallbackError) {
-      lastError = fallbackError;
-      console.warn(`@google/generative-ai failed with model ${modelName}:`, fallbackError.message);
+
+      const response = await result.response;
+      const text = response.text();
+      if (text) {
+        return text;
+      }
+    } catch (altError) {
+      console.warn(`@google/generative-ai failed with model ${modelName}:`, altError.message);
+      lastError = altError;
     }
   }
 
-  const details = lastError ? ` Details: ${lastError.message}` : '';
-  return `⚠️ Unable to connect to Gemini AI.${details}`;
+  return `⚠️ Unable to connect to Gemini AI (${lastError ? lastError.message : 'Model error'}). Please verify your GEMINI_API_KEY in Render.`;
+}
+
+// ==========================================
+// NATURAL LANGUAGE IMAGE PROMPT DETECTOR
+// ==========================================
+function extractImagePrompt(text) {
+  if (!text) return null;
+  const trimmed = text.trim();
+
+  // 1. Explicit slash commands: /image, /generate, /draw, /img
+  if (/^\/(image|generate|draw|img)\s+/i.test(trimmed)) {
+    return trimmed.replace(/^\/(image|generate|draw|img)\s+/i, '').trim();
+  }
+
+  // 2. Natural language image request patterns
+  const patterns = [
+    /^(?:please\s+)?(?:can\s+you\s+)?(?:create|generate|draw|make|paint|render|produce|design)\s+(?:an?\s+)?(?:image|picture|photo|illustration|drawing|artwork|art|graphic|wallpaper)\s+(?:of|about|for|showing|depicting|with)?\s*(.+)$/i,
+    /^(?:show\s+me|give\s+me)\s+(?:an?\s+)?(?:image|picture|photo|illustration|drawing|artwork)\s+(?:of|about|showing|depicting)?\s*(.+)$/i,
+    /^(?:i\s+want\s+(?:an?\s+)?(?:image|picture|photo|drawing|illustration)\s+(?:of|about|showing)?\s*)(.+)$/i
+  ];
+
+  for (const regex of patterns) {
+    const match = trimmed.match(regex);
+    if (match && match[1] && match[1].trim().length > 1) {
+      return match[1].trim();
+    }
+  }
+
+  return null;
+}
+
+// ==========================================
+// AI IMAGE GENERATOR (OpenAI DALL-E & Fast AI Engine)
+// ==========================================
+async function generateAIImage(prompt) {
+  // Strategy 1: OpenAI DALL-E (if OPENAI_API_KEY is configured)
+  if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim() !== '') {
+    try {
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY.trim() });
+      let response;
+      try {
+        response = await openai.images.generate({
+          model: 'dall-e-3',
+          prompt: prompt,
+          n: 1,
+          size: '1024x1024',
+          quality: 'standard'
+        });
+      } catch (dalle3Err) {
+        console.warn('DALL-E 3 error, falling back to DALL-E 2:', dalle3Err.message);
+        response = await openai.images.generate({
+          model: 'dall-e-2',
+          prompt: prompt,
+          n: 1,
+          size: '512x512'
+        });
+      }
+
+      if (response && response.data && response.data[0] && response.data[0].url) {
+        // Download and cache image locally to avoid expiring temporary URLs
+        try {
+          const imgFetch = await fetch(response.data[0].url);
+          if (imgFetch.ok) {
+            const buffer = Buffer.from(await imgFetch.arrayBuffer());
+            const filename = `dalle-${Date.now()}-${Math.round(Math.random() * 1e6)}.png`;
+            const localFilePath = path.join(uploadsDir, filename);
+            fs.writeFileSync(localFilePath, buffer);
+            return {
+              imageUrl: `/uploads/${filename}`,
+              provider: 'DALL·E 3'
+            };
+          }
+        } catch (downloadErr) {
+          console.warn('Could not save DALL-E image locally, using remote URL:', downloadErr.message);
+          return {
+            imageUrl: response.data[0].url,
+            provider: 'DALL·E 3'
+          };
+        }
+      }
+    } catch (openaiErr) {
+      console.warn('OpenAI Image Generation Error, falling back to AI engine:', openaiErr.message);
+    }
+  }
+
+  // Strategy 2: High-Definition AI Engine (Pollinations / Stable Diffusion HD)
+  try {
+    const seed = Math.floor(Math.random() * 1e9);
+    const encodedPrompt = encodeURIComponent(prompt);
+    const remoteUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${seed}&model=flux`;
+
+    const imgRes = await fetch(remoteUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+
+    if (imgRes.ok) {
+      const buffer = Buffer.from(await imgRes.arrayBuffer());
+      const filename = `ai-art-${Date.now()}-${Math.round(Math.random() * 1e6)}.jpg`;
+      const localFilePath = path.join(uploadsDir, filename);
+      fs.writeFileSync(localFilePath, buffer);
+      return {
+        imageUrl: `/uploads/${filename}`,
+        provider: 'AI Vision Engine'
+      };
+    }
+  } catch (hdErr) {
+    console.warn('High-Def AI generator fetch error, using direct stream URL:', hdErr.message);
+    const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true&seed=${Math.floor(Math.random() * 1e9)}`;
+    return {
+      imageUrl: fallbackUrl,
+      provider: 'AI Vision Engine'
+    };
+  }
+
+  throw new Error('All image generation services are currently unavailable. Please try again in a few moments.');
 }
 
 // ==========================================
@@ -244,6 +358,97 @@ router.delete('/api/conversations/:id', async (req, res) => {
 // 2. CHAT & VISION COMPLETION
 // ==========================================
 
+// Handle Image Generation Execution
+async function handleImageGeneration(req, res, prompt, conversationId, originalText) {
+  try {
+    const cleanPrompt = (prompt || '').trim();
+    if (!cleanPrompt) {
+      return res.status(400).json({ error: 'Please provide a description for the image you want to generate.' });
+    }
+
+    // Ensure conversation exists
+    let conversation;
+    if (conversationId && mongoose.Types.ObjectId.isValid(conversationId)) {
+      conversation = await Conversation.findOne({ _id: conversationId, userId: req.user._id });
+    }
+
+    if (!conversation) {
+      conversation = await Conversation.create({
+        userId: req.user._id,
+        title: `Image: ${cleanPrompt.length > 25 ? cleanPrompt.substring(0, 25) + '...' : cleanPrompt}`
+      });
+      conversationId = conversation._id;
+    } else if (conversation.title === 'New Chat') {
+      conversation.title = `Image: ${cleanPrompt.length > 25 ? cleanPrompt.substring(0, 25) + '...' : cleanPrompt}`;
+      await conversation.save();
+    }
+
+    // Save user prompt message
+    let userMessageDoc;
+    try {
+      userMessageDoc = await Message.create({
+        conversationId: conversation._id,
+        userId: req.user._id,
+        sender: 'user',
+        text: originalText || cleanPrompt,
+        imageUrl: ''
+      });
+    } catch (dbErr) {
+      console.error('DB Error user message:', dbErr);
+    }
+
+    // Generate the image
+    let generatedData;
+    try {
+      generatedData = await generateAIImage(cleanPrompt);
+    } catch (genErr) {
+      console.error('Image generation error:', genErr);
+      return res.status(500).json({ error: 'Failed to generate image: ' + genErr.message });
+    }
+
+    const botReplyText = `Here is your generated image for: "${cleanPrompt}"`;
+
+    // Save bot message with generated image
+    let botMessageDoc;
+    try {
+      botMessageDoc = await Message.create({
+        conversationId: conversation._id,
+        userId: req.user._id,
+        sender: 'bot',
+        text: botReplyText,
+        imageUrl: generatedData.imageUrl,
+        isGeneratedImage: true
+      });
+    } catch (dbErr) {
+      console.error('DB Error bot message:', dbErr);
+    }
+
+    try {
+      conversation.updatedAt = new Date();
+      await conversation.save();
+    } catch (dbErr) {
+      console.error('DB Error update conversation:', dbErr);
+    }
+
+    return res.json({
+      success: true,
+      reply: botReplyText,
+      imageUrl: generatedData.imageUrl,
+      generatedImageUrl: generatedData.imageUrl,
+      isGeneratedImage: true,
+      provider: generatedData.provider,
+      conversationId: conversation._id,
+      conversationTitle: conversation.title,
+      userMessage: userMessageDoc,
+      botMessage: botMessageDoc
+    });
+
+  } catch (err) {
+    console.error('handleImageGeneration error:', err);
+    return res.status(500).json({ error: err.message || 'Error generating image.' });
+  }
+}
+
 // POST /chat - Send text and optional image to Gemini
 router.post('/chat', (req, res, next) => {
   upload.single('image')(req, res, function (err) {
@@ -267,10 +472,10 @@ router.post('/chat', (req, res, next) => {
       return res.status(400).json({ error: 'Please provide a message or upload an image.' });
     }
 
-    // Check if the user intends to generate an AI image via slash command
-    if (userMsg.startsWith('/image ') || userMsg.startsWith('/generate ')) {
-      const prompt = userMsg.replace(/^\/(image|generate)\s+/, '').trim();
-      return handleImageGeneration(req, res, prompt, conversationId);
+    // Check if the user message is an image generation request (slash command or natural language)
+    const detectedImagePrompt = !uploadedFile ? extractImagePrompt(userMsg) : null;
+    if (detectedImagePrompt) {
+      return handleImageGeneration(req, res, detectedImagePrompt, conversationId, userMsg);
     }
 
     // Ensure or create conversation
@@ -307,11 +512,11 @@ router.post('/chat', (req, res, next) => {
         imageUrl: imageUrl
       });
     } catch (dbErr) {
-      console.error('Error saving user message to MongoDB:', dbErr);
+      console.error('DB Error saving user message:', dbErr);
     }
 
     // Call Gemini AI
-    const geminiResponse = await callGeminiAI(userMsg, uploadedFile);
+    const botReply = await callGeminiAI(userMsg, uploadedFile);
 
     // Save bot reply to MongoDB
     let botMessageDoc;
@@ -320,12 +525,11 @@ router.post('/chat', (req, res, next) => {
         conversationId: conversation._id,
         userId: req.user._id,
         sender: 'bot',
-        text: geminiResponse,
-        imageUrl: '',
-        isGeneratedImage: false
+        text: botReply,
+        imageUrl: ''
       });
     } catch (dbErr) {
-      console.error('Error saving bot reply to MongoDB:', dbErr);
+      console.error('DB Error saving bot message:', dbErr);
     }
 
     // Update conversation timestamp
@@ -333,12 +537,13 @@ router.post('/chat', (req, res, next) => {
       conversation.updatedAt = new Date();
       await conversation.save();
     } catch (dbErr) {
-      console.error('Error updating conversation timestamp:', dbErr);
+      console.error('DB Error updating conversation:', dbErr);
     }
 
     return res.json({
       success: true,
-      reply: geminiResponse,
+      reply: botReply,
+      imageUrl: '',
       conversationId: conversation._id,
       conversationTitle: conversation.title,
       userMessage: userMessageDoc,
@@ -346,136 +551,15 @@ router.post('/chat', (req, res, next) => {
     });
 
   } catch (error) {
-    console.error('Chat endpoint error:', error);
-    return res.status(500).json({ error: error.message || 'Server error processing your message.' });
+    console.error('Error in /chat endpoint:', error);
+    return res.status(500).json({ error: 'Server error: ' + error.message });
   }
 });
-
-// ==========================================
-// 3. AI IMAGE GENERATION (DALL·E)
-// ==========================================
-
-async function handleImageGeneration(req, res, prompt, conversationId) {
-  try {
-    if (!prompt) {
-      return res.status(400).json({ error: 'Please provide a prompt for image generation (e.g. /image a serene mountain lake at sunrise).' });
-    }
-
-    // Ensure conversation exists
-    let conversation;
-    if (conversationId && mongoose.Types.ObjectId.isValid(conversationId)) {
-      conversation = await Conversation.findOne({ _id: conversationId, userId: req.user._id });
-    }
-
-    if (!conversation) {
-      conversation = await Conversation.create({
-        userId: req.user._id,
-        title: `Image: ${prompt.length > 25 ? prompt.substring(0, 25) + '...' : prompt}`
-      });
-      conversationId = conversation._id;
-    } else if (conversation.title === 'New Chat') {
-      conversation.title = `Image: ${prompt.length > 25 ? prompt.substring(0, 25) + '...' : prompt}`;
-      await conversation.save();
-    }
-
-    // Save user prompt message
-    let userMessageDoc;
-    try {
-      userMessageDoc = await Message.create({
-        conversationId: conversation._id,
-        userId: req.user._id,
-        sender: 'user',
-        text: `/image ${prompt}`,
-        imageUrl: ''
-      });
-    } catch (dbErr) {
-      console.error('DB Error:', dbErr);
-    }
-
-    // Call OpenAI DALL-E
-    let generatedImageUrl = '';
-    let botReplyText = `Generated image for prompt: "${prompt}"`;
-
-    if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.trim() === '') {
-      const fallbackPrompt = `The user asked for an image of "${prompt}". Give a detailed, creative, and beautiful answer explaining and visualizing this concept in detail.`;
-      const aiResponse = await callGeminiAI(fallbackPrompt, null);
-      botReplyText = `${aiResponse}\n\n*(Note: To generate real DALL·E images directly in chat, add your OPENAI_API_KEY in your Render dashboard environment variables).*`;
-    } else {
-      try {
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        let response;
-        try {
-          response = await openai.images.generate({
-            model: 'dall-e-3',
-            prompt: prompt,
-            n: 1,
-            size: '1024x1024',
-            quality: 'standard'
-          });
-        } catch (dalle3Err) {
-          console.warn('DALL-E 3 error, falling back to DALL-E 2:', dalle3Err.message);
-          response = await openai.images.generate({
-            model: 'dall-e-2',
-            prompt: prompt,
-            n: 1,
-            size: '512x512'
-          });
-        }
-
-        if (response && response.data && response.data[0]) {
-          generatedImageUrl = response.data[0].url;
-        }
-      } catch (openaiErr) {
-        console.error('OpenAI Image Generation Error:', openaiErr);
-        const fallbackPrompt = `The user asked for an image of "${prompt}". Give a detailed, creative, and beautiful answer explaining and visualizing this concept in detail.`;
-        const aiResponse = await callGeminiAI(fallbackPrompt, null);
-        botReplyText = `${aiResponse}\n\n*(Image Generation Note: ${openaiErr.message || 'OpenAI quota exceeded or key invalid'}).*`;
-      }
-    }
-
-    // Save bot message with generated image
-    let botMessageDoc;
-    try {
-      botMessageDoc = await Message.create({
-        conversationId: conversation._id,
-        userId: req.user._id,
-        sender: 'bot',
-        text: botReplyText,
-        imageUrl: generatedImageUrl,
-        isGeneratedImage: !!generatedImageUrl
-      });
-    } catch (dbErr) {
-      console.error('DB Error:', dbErr);
-    }
-
-    try {
-      conversation.updatedAt = new Date();
-      await conversation.save();
-    } catch (dbErr) {
-      console.error('DB Error:', dbErr);
-    }
-
-    return res.json({
-      success: true,
-      reply: botReplyText,
-      generatedImageUrl: generatedImageUrl,
-      isGeneratedImage: !!generatedImageUrl,
-      conversationId: conversation._id,
-      conversationTitle: conversation.title,
-      userMessage: userMessageDoc,
-      botMessage: botMessageDoc
-    });
-
-  } catch (err) {
-    console.error('handleImageGeneration error:', err);
-    return res.status(500).json({ error: err.message || 'Error generating image.' });
-  }
-}
 
 // POST /api/generate-image - Dedicated API route for image generation
 router.post('/api/generate-image', async (req, res) => {
   const { prompt, conversationId } = req.body;
-  return handleImageGeneration(req, res, prompt, conversationId);
+  return handleImageGeneration(req, res, prompt, conversationId, `/image ${prompt}`);
 });
 
 module.exports = router;

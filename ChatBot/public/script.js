@@ -390,7 +390,14 @@ async function handleFormSubmit(e) {
   updateSendButtonState();
   emptyState.classList.add('hidden');
 
-  const isDalleGen = text.startsWith('/image ') || text.startsWith('/generate ') || isImageGenMode;
+  const isImageRequest = (
+    text.startsWith('/image ') ||
+    text.startsWith('/generate ') ||
+    text.startsWith('/draw ') ||
+    text.startsWith('/img ') ||
+    isImageGenMode ||
+    /^(?:please\s+)?(?:can\s+you\s+)?(?:create|generate|draw|make|paint|render)\s+(?:an?\s+)?(?:image|picture|photo|illustration|drawing|artwork)/i.test(text)
+  ) && !imageFile;
 
   // Append user bubble immediately
   let localImgPreviewUrl = null;
@@ -408,16 +415,16 @@ async function handleFormSubmit(e) {
   scrollToBottom();
 
   // Create loading typing/generating bubble
-  const botRow = createLoadingBubble(isDalleGen);
+  const botRow = createLoadingBubble(isImageRequest);
   messagesContainer.appendChild(botRow);
   scrollToBottom();
 
   try {
     let resData;
 
-    if (isDalleGen && !imageFile) {
-      // DALL-E Image Generation Call
-      const prompt = text.replace(/^\/(image|generate)\s+/, '').trim();
+    if ((text.startsWith('/image ') || text.startsWith('/generate ') || text.startsWith('/draw ')) && !imageFile) {
+      // Dedicated Slash Image Call
+      const prompt = text.replace(/^\/(image|generate|draw|img)\s+/i, '').trim();
       const res = await fetch('/api/generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -428,7 +435,7 @@ async function handleFormSubmit(e) {
       });
       resData = await res.json();
     } else {
-      // Standard Chat / Multimodal Vision Call
+      // Standard Chat / Vision / Natural Language Image Call
       const formData = new FormData();
       if (text) formData.append('message', text);
       if (currentConversationId) formData.append('conversationId', currentConversationId);
@@ -456,10 +463,13 @@ async function handleFormSubmit(e) {
         await loadConversations();
       }
 
-      // Render bot message
+      // Render bot message (text + generated or vision image)
+      const targetImgUrl = resData.imageUrl || resData.generatedImageUrl || (resData.botMessage && resData.botMessage.imageUrl);
+      const isGen = !!(resData.isGeneratedImage || (resData.botMessage && resData.botMessage.isGeneratedImage));
+
       appendMessageBubble('bot', resData.reply || '', {
-        imageUrl: resData.generatedImageUrl || (resData.botMessage && resData.botMessage.imageUrl),
-        isGeneratedImage: resData.isGeneratedImage || (resData.botMessage && resData.botMessage.isGeneratedImage)
+        imageUrl: targetImgUrl,
+        isGeneratedImage: isGen
       });
     }
 
