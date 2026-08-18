@@ -130,7 +130,7 @@ router.post('/api/auth/login', async (req, res) => {
 // FORGOT PASSWORD & OTP VERIFICATION FLOW
 // ==========================================
 
-// 1. POST /api/auth/forgot-password - Send 4-digit OTP
+// 1. POST /api/auth/forgot-password - Send 4-digit OTP via Email
 router.post('/api/auth/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -152,39 +152,48 @@ router.post('/api/auth/forgot-password', async (req, res) => {
     user.resetOtpExpires = otpExpires;
     await user.save();
 
-    // Try sending email if SMTP is configured
+    // Check mail transporter
     const transporter = getMailTransporter();
-    let emailSent = false;
+    if (!transporter) {
+      return res.status(500).json({
+        error: 'Email service is not configured. Please add EMAIL_USER and EMAIL_PASS (Gmail App Password) in your Render environment variables to send OTP emails.'
+      });
+    }
 
-    if (transporter) {
-      try {
-        await transporter.sendMail({
-          from: `"AI Chatbot Security" <${process.env.EMAIL_USER || 'no-reply@aichatbot.com'}>`,
-          to: user.email,
-          subject: '🔐 Your 4-Digit Password Reset OTP',
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; background: #f8fafc; border-radius: 12px; border: 1px solid #e2e8f0;">
-              <h2 style="color: #1e293b; margin-bottom: 8px;">Password Reset Request</h2>
-              <p style="color: #64748b; font-size: 14px; line-height: 1.5;">You requested to reset your password for AI Chatbot. Use the 4-digit OTP below to proceed:</p>
-              <div style="margin: 24px 0; text-align: center;">
-                <span style="display: inline-block; font-size: 32px; font-weight: 700; letter-spacing: 8px; color: #2563eb; background: #eff6ff; padding: 12px 24px; border-radius: 8px; border: 2px dashed #3b82f6;">${otp}</span>
-              </div>
-              <p style="color: #94a3b8; font-size: 12px;">This OTP is valid for 10 minutes. If you did not request a password reset, please ignore this email.</p>
+    // Send OTP email
+    try {
+      await transporter.sendMail({
+        from: `"AI Chatbot Security" <${process.env.EMAIL_USER || process.env.GMAIL_USER}>`,
+        to: user.email,
+        subject: '🔐 Your 4-Digit Password Reset OTP',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 28px; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; color: #1e293b;">
+            <div style="text-align: center; margin-bottom: 20px;">
+              <h2 style="color: #0f172a; margin: 0;">Password Reset Verification</h2>
+              <p style="color: #64748b; font-size: 14px; margin-top: 6px;">AI Chatbot Account Security</p>
             </div>
-          `
-        });
-        emailSent = true;
-      } catch (mailErr) {
-        console.warn('Could not send email via SMTP:', mailErr.message);
-      }
+            <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello,</p>
+            <p style="font-size: 14px; line-height: 1.6; color: #334155;">We received a request to reset your password. Use the following 4-digit OTP to verify your identity:</p>
+            <div style="margin: 28px 0; text-align: center;">
+              <span style="display: inline-block; font-size: 36px; font-weight: 800; letter-spacing: 12px; color: #2563eb; background: #eff6ff; padding: 14px 28px; border-radius: 10px; border: 2px dashed #3b82f6; font-family: monospace;">${otp}</span>
+            </div>
+            <p style="font-size: 13px; color: #64748b; line-height: 1.5;">This code will expire in <strong>10 minutes</strong>. If you did not make this request, you can safely ignore this email.</p>
+            <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 24px 0;" />
+            <p style="font-size: 11px; color: #94a3b8; text-align: center; margin: 0;">&copy; AI Chatbot. All rights reserved.</p>
+          </div>
+        `
+      });
+    } catch (mailErr) {
+      console.error('Nodemailer send error:', mailErr);
+      return res.status(500).json({
+        error: `Failed to send email to ${user.email}: ${mailErr.message || 'SMTP authentication failed'}. Please verify your Gmail App Password.`
+      });
     }
 
     return res.json({
       success: true,
-      message: '4-digit OTP generated successfully!',
-      otp: otp, // Displayed on screen for instant student verification
-      email: user.email,
-      emailSent: emailSent
+      message: `A 4-digit OTP has been sent to ${user.email}. Please check your inbox.`,
+      email: user.email
     });
 
   } catch (error) {

@@ -29,35 +29,29 @@
       text-decoration: underline;
       opacity: 0.9;
     }
-    .otp-display-card {
-      background: rgba(59, 130, 246, 0.12);
-      border: 2px dashed #3b82f6;
-      border-radius: var(--radius-lg);
-      padding: 16px;
-      text-align: center;
-      margin-bottom: 16px;
-      animation: fadeIn 0.3s ease;
-    }
-    .otp-label {
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+    .email-sent-notice {
+      background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      border-radius: var(--radius-md);
+      padding: 12px 14px;
+      font-size: 13px;
       color: var(--text-secondary);
-      margin-bottom: 6px;
+      line-height: 1.5;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
     }
-    .otp-code-value {
-      font-size: 32px;
-      font-weight: 800;
-      letter-spacing: 10px;
-      color: #3b82f6;
-      font-family: monospace;
-      margin-left: 10px;
+    .email-sent-notice svg {
+      width: 18px;
+      height: 18px;
+      color: var(--accent-primary);
+      flex-shrink: 0;
+      margin-top: 2px;
     }
-    .otp-hint {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-top: 4px;
+    .email-sent-notice strong {
+      color: var(--text-primary);
+      word-break: break-all;
     }
     .back-btn-wrapper {
       margin-top: 14px;
@@ -187,11 +181,11 @@
             <i data-lucide="mail" class="input-icon"></i>
             <input type="email" id="forgot-email" placeholder="student@example.com" required>
           </div>
-          <span class="form-hint">We will generate a 4-digit verification code.</span>
+          <span class="form-hint">A 4-digit verification code will be sent to your email.</span>
         </div>
 
         <button type="submit" id="send-otp-btn" class="btn btn-primary btn-block">
-          <span class="btn-text">Send 4-Digit OTP</span>
+          <span class="btn-text">Send 4-Digit OTP to Email</span>
           <span class="spinner hidden"></span>
         </button>
 
@@ -202,23 +196,25 @@
         </div>
       </form>
 
-      <!-- 4. FORGOT PASSWORD STEP 2: Verify 4-Digit OTP -->
+      <!-- 4. FORGOT PASSWORD STEP 2: Verify 4-Digit OTP from Email -->
       <form id="forgot-step2-form" class="auth-form hidden" onsubmit="handleVerifyOtp(event)">
-        <div class="step-badge">Step 2 of 3: OTP Verification</div>
+        <div class="step-badge">Step 2 of 3: Enter OTP from Email</div>
         
-        <!-- On-screen 4-Digit OTP Banner -->
-        <div class="otp-display-card" id="otp-display-card">
-          <div class="otp-label">📲 Your 4-Digit Verification OTP:</div>
-          <div class="otp-code-value" id="screen-otp-val">----</div>
-          <div class="otp-hint">Enter this 4-digit code in the box below.</div>
+        <!-- Notice confirming email sent -->
+        <div class="email-sent-notice">
+          <i data-lucide="mail-check"></i>
+          <div>
+            We sent a 4-digit code to <strong id="screen-user-email">your email</strong>. Please check your inbox (and spam folder) and enter it below.
+          </div>
         </div>
 
         <div class="form-group">
           <label for="otp-input">Enter 4-Digit OTP</label>
           <div class="input-wrapper">
             <i data-lucide="key-round" class="input-icon"></i>
-            <input type="text" id="otp-input" placeholder="4-digit code" maxlength="4" pattern="\d{4}" required style="letter-spacing: 4px; font-weight: 700; font-size: 16px;">
+            <input type="text" id="otp-input" placeholder="••••" maxlength="4" pattern="\d{4}" required autocomplete="one-time-code" style="letter-spacing: 6px; font-weight: 700; font-size: 18px; text-align: center;">
           </div>
+          <span class="form-hint">4-digit code expires in 10 minutes</span>
         </div>
 
         <button type="submit" id="verify-otp-btn" class="btn btn-primary btn-block">
@@ -228,7 +224,7 @@
 
         <div class="back-btn-wrapper" style="display: flex; justify-content: space-between; align-items: center;">
           <button type="button" class="back-to-login-btn" onclick="openForgotPassword(event)">
-            <i data-lucide="refresh-cw"></i> Resend
+            <i data-lucide="refresh-cw"></i> Resend OTP
           </button>
           <button type="button" class="back-to-login-btn" onclick="switchAuthMode('login')">
             <i data-lucide="arrow-left"></i> Back to Log In
@@ -236,7 +232,7 @@
         </div>
       </form>
 
-      <!-- 5. FORGOT PASSWORD STEP 3: Create New Password & Confirm Password -->
+      <!-- 5. FORGOT PASSWORD STEP 3: Create New Password & Confirm Password (only shown after OTP verified) -->
       <form id="forgot-step3-form" class="auth-form hidden" onsubmit="handleResetPassword(event)">
         <div class="step-badge">Step 3 of 3: Create New Password</div>
 
@@ -264,7 +260,7 @@
         </div>
 
         <button type="submit" id="reset-pw-btn" class="btn btn-primary btn-block">
-          <span class="btn-text">Update Password & Log In</span>
+          <span class="btn-text">Save New Password & Log In</span>
           <span class="spinner hidden"></span>
         </button>
 
@@ -368,14 +364,14 @@
       lucide.createIcons();
     }
 
-    // Step 1: Send OTP
+    // Step 1: Send OTP to Email
     async function handleSendOtp(e) {
       e.preventDefault();
       const email = document.getElementById('forgot-email').value.trim();
       const submitBtn = document.getElementById('send-otp-btn');
       
       if (!email) {
-        showAlert('Please enter your email address.');
+        showAlert('Please enter your registered email address.');
         return;
       }
 
@@ -390,34 +386,33 @@
         const data = await res.json();
 
         if (!res.ok || !data.success) {
-          showAlert(data.error || 'Failed to send OTP.');
+          showAlert(data.error || 'Failed to send OTP email.');
         } else {
           recoveryEmail = email;
-          // Display the 4-digit OTP directly on screen
-          document.getElementById('screen-otp-val').textContent = data.otp || '----';
+          document.getElementById('screen-user-email').textContent = email;
           
           hideAllForms();
           document.getElementById('auth-tabs').classList.add('hidden');
           document.getElementById('forgot-step2-form').classList.remove('hidden');
-          showAlert(data.message || '4-digit OTP generated! Check screen/email.', 'success');
-          document.getElementById('otp-input').value = data.otp || '';
+          document.getElementById('otp-input').value = '';
           document.getElementById('otp-input').focus();
+          showAlert(`4-digit OTP sent to ${email}. Please check your inbox!`, 'success');
         }
       } catch (err) {
-        showAlert('Network error. Could not reach server.');
+        showAlert('Network error. Could not connect to server.');
       } finally {
         setBtnLoading(submitBtn, false);
       }
     }
 
-    // Step 2: Verify OTP
+    // Step 2: Verify OTP entered by user
     async function handleVerifyOtp(e) {
       e.preventDefault();
       const otp = document.getElementById('otp-input').value.trim();
       const submitBtn = document.getElementById('verify-otp-btn');
 
       if (!otp || otp.length !== 4) {
-        showAlert('Please enter the 4-digit OTP.');
+        showAlert('Please enter the 4-digit OTP from your email.');
         return;
       }
 
@@ -432,7 +427,7 @@
         const data = await res.json();
 
         if (!res.ok || !data.success) {
-          showAlert(data.error || 'Invalid OTP code.');
+          showAlert(data.error || 'Invalid 4-digit OTP. Please check your email and try again.');
         } else {
           verifiedOtp = otp;
           hideAllForms();
@@ -494,7 +489,7 @@
             document.getElementById('login-email').value = recoveryEmail;
             document.getElementById('login-password').value = '';
             document.getElementById('login-password').focus();
-            showAlert('Password reset successful! You can now log in.', 'success');
+            showAlert('Password reset successful! You can now log in with your new password.', 'success');
           }, 1000);
         }
       } catch (err) {
