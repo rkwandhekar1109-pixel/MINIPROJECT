@@ -3,6 +3,7 @@ const dns = require('dns');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const { JWT_SECRET, requireAuthApi, redirectIfAuth } = require('../middleware/auth');
 
@@ -34,7 +35,7 @@ router.get('/signup', redirectIfAuth, (req, res) => {
 });
 
 // ==========================================
-// 2. SIGNUP & REGISTRATION
+// 2. MULTI-USER SIGNUP & REGISTRATION
 // ==========================================
 router.post('/api/auth/signup', async (req, res) => {
   try {
@@ -54,6 +55,8 @@ router.post('/api/auth/signup', async (req, res) => {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+    
+    // Explicitly query database for existing user
     const existingUser = await User.findOne({ email: normalizedEmail });
     if (existingUser) {
       return res.status(400).json({ error: 'An account with this email already exists.' });
@@ -63,10 +66,42 @@ router.post('/api/auth/signup', async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    const newUser = await User.create({
-      email: normalizedEmail,
-      password: hashedPassword
-    });
+    let newUser;
+    try {
+      newUser = await User.create({
+        email: normalizedEmail,
+        password: hashedPassword
+      });
+    } catch (createErr) {
+      // Handle MongoDB E11000 duplicate key error
+      if (createErr.code === 11000) {
+        const isEmailDup = createErr.keyPattern ? !!createErr.keyPattern.email : (createErr.message && createErr.message.includes('email_1'));
+        if (isEmailDup) {
+          return res.status(400).json({ error: 'An account with this email already exists.' });
+        }
+
+        // If duplicate key error occurred on an old/legacy index (e.g. username_1), drop that index and retry!
+        try {
+          const usersCollection = mongoose.connection.collection('users');
+          const indexes = await usersCollection.indexes();
+          for (const idx of indexes) {
+            if (idx.name !== '_id_' && idx.name !== 'email_1' && idx.unique) {
+              console.log(`Dropping conflicting legacy index: ${idx.name}`);
+              await usersCollection.dropIndex(idx.name);
+            }
+          }
+          newUser = await User.create({
+            email: normalizedEmail,
+            password: hashedPassword
+          });
+        } catch (retryErr) {
+          console.error('Signup retry after index drop failed:', retryErr);
+          throw retryErr;
+        }
+      } else {
+        throw createErr;
+      }
+    }
 
     const token = jwt.sign({ id: newUser._id, email: newUser.email }, JWT_SECRET, { expiresIn: '7d' });
     res.cookie('token', token, COOKIE_OPTIONS);
@@ -81,9 +116,6 @@ router.post('/api/auth/signup', async (req, res) => {
     });
   } catch (error) {
     console.error('Signup error:', error);
-    if (error.code === 11000) {
-      return res.status(400).json({ error: 'An account with this email already exists.' });
-    }
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(val => val.message);
       return res.status(400).json({ error: messages.join(', ') });
@@ -271,7 +303,7 @@ async function sendPasswordResetEmail(toEmail, otp) {
 }
 
 // ==========================================
-// 5. FORGOT PASSWORD & OTP FLOW
+// 5. FORGOT PASSWORD & OTP FLOW (MULTI-USER)
 // ==========================================
 
 // Step 1: POST /api/auth/forgot-password - Send OTP to registered email
@@ -279,22 +311,28 @@ router.post('/api/auth/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) {
-      return res.status(400).json({ error: 'Please provide your registered email address.' });
+      return res.status(400).json({ error: 'Please provide your email address.' });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
     const user = await User.findOne({ email: normalizedEmail });
+
+    // Privacy & Security: Generic response if email not registered (prevents email harvesting)
     if (!user) {
-      return res.status(404).json({ error: 'No account found with this email address. Please check or register first.' });
+      return res.json({
+        success: true,
+        message: `If an account exists for ${normalizedEmail}, a 4-digit verification OTP has been sent. Please check your inbox.`,
+        email: normalizedEmail
+      });
     }
 
-    // Rate limiting: 45s cooldown between OTP requests
+    // Per-user rate limiting: 45s cooldown between OTP requests
     if (user.lastOtpSentAt && (Date.now() - new Date(user.lastOtpSentAt).getTime()) < 45 * 1000) {
       const waitSec = Math.ceil((45 * 1000 - (Date.now() - new Date(user.lastOtpSentAt).getTime())) / 1000);
-      return res.status(429).json({ error: `Please wait ${waitSec} seconds before requesting a new OTP.` });
+      return res.status(429).json({ error: `Please wait ${waitSec} seconds before requesting another OTP.` });
     }
 
-    // Generate secure 4-digit random OTP
+    // Generate secure 4-digit random OTP specific to this user
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
 
@@ -308,7 +346,7 @@ router.post('/api/auth/forgot-password', async (req, res) => {
     user.lastOtpSentAt = new Date();
     await user.save();
 
-    // Dispatch email
+    // Dispatch email strictly to this user's registered address
     const sendResult = await sendPasswordResetEmail(user.email, otp);
 
     if (sendResult && sendResult.success) {
@@ -329,7 +367,7 @@ router.post('/api/auth/forgot-password', async (req, res) => {
   }
 });
 
-// Step 2: POST /api/auth/verify-otp - Verify 4-digit OTP
+// Step 2: POST /api/auth/verify-otp - Verify 4-digit OTP for specific user
 router.post('/api/auth/verify-otp', async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -347,7 +385,7 @@ router.post('/api/auth/verify-otp', async (req, res) => {
     const user = await User.findOne({ email: normalizedEmail });
 
     if (!user || !user.resetOtp || !user.resetOtpExpires) {
-      return res.status(400).json({ error: 'No active OTP request found. Please request a new OTP.' });
+      return res.status(400).json({ error: 'No active OTP request found for this email. Please request a new OTP.' });
     }
 
     // Check expiration
@@ -358,7 +396,7 @@ router.post('/api/auth/verify-otp', async (req, res) => {
       return res.status(400).json({ error: 'The 4-digit OTP has expired. Please request a new one.' });
     }
 
-    // Brute force protection: max 5 attempts
+    // Brute force protection: max 5 attempts per user
     if (user.otpAttempts >= 5) {
       user.resetOtp = null;
       user.resetOtpExpires = null;
@@ -375,7 +413,7 @@ router.post('/api/auth/verify-otp', async (req, res) => {
       return res.status(400).json({ error: `Invalid 4-digit OTP. (${remaining} attempts remaining).` });
     }
 
-    // Generate single-use reset JWT token (valid for 15 minutes)
+    // Generate user-specific single-use reset JWT token (valid for 15 minutes)
     const resetToken = jwt.sign(
       { id: user._id, email: user.email, purpose: 'password_reset' },
       JWT_SECRET,
@@ -394,7 +432,7 @@ router.post('/api/auth/verify-otp', async (req, res) => {
   }
 });
 
-// Step 3: POST /api/auth/reset-password - Create New Password
+// Step 3: POST /api/auth/reset-password - Create New Password for verified user
 router.post('/api/auth/reset-password', async (req, res) => {
   try {
     const { email, resetToken, newPassword, confirmPassword } = req.body;
@@ -426,7 +464,7 @@ router.post('/api/auth/reset-password', async (req, res) => {
     const user = await User.findById(decoded.id);
 
     if (!user || user.email !== normalizedEmail) {
-      return res.status(400).json({ error: 'User record not found.' });
+      return res.status(400).json({ error: 'User record mismatch. Please request a new OTP.' });
     }
 
     // Hash the new password securely

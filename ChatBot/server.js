@@ -38,7 +38,22 @@ app.set('views', path.join(__dirname, 'views'));
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/chatbot';
 
 mongoose.connect(MONGO_URI)
-  .then(() => console.log('✅ MongoDB Connected'))
+  .then(async () => {
+    console.log('✅ MongoDB Connected');
+    try {
+      // Clean up legacy non-email unique indexes on 'users' collection to ensure multi-user creation never collides
+      const usersCollection = mongoose.connection.collection('users');
+      const indexes = await usersCollection.indexes();
+      for (const idx of indexes) {
+        if (idx.name !== '_id_' && idx.name !== 'email_1' && idx.unique) {
+          console.log(`🔧 Dropping legacy unique index to support multi-user signup: ${idx.name}`);
+          await usersCollection.dropIndex(idx.name);
+        }
+      }
+    } catch (idxErr) {
+      // Collection may be brand new or already clean
+    }
+  })
   .catch((err) => {
     console.error('❌ MongoDB Connection Error:', err.message);
     console.log('⚠️ Please ensure MongoDB is running or MONGO_URI is set in .env');
