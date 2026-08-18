@@ -1,8 +1,10 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const OpenAI = require('openai');
 
 const Conversation = require('../models/Conversation');
@@ -14,30 +16,22 @@ const router = express.Router();
 // Apply requireAuthApi to all routes in this router
 router.use(requireAuthApi);
 
-// Initialize Gemini
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || ''
-});
-
-// Helper for OpenAI
-const getOpenAIClient = () => {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is not configured in backend environment variables.');
-  }
-  return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-  });
-};
-
 // Ensure uploads folder exists
 const uploadsDir = path.join(__dirname, '../public/uploads');
 if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
+  try {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  } catch (e) {
+    console.warn('Could not create uploads directory:', e.message);
+  }
 }
 
 // Multer Storage Configuration
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
     cb(null, uploadsDir);
   },
   filename: function (req, file, cb) {
@@ -62,14 +56,82 @@ const upload = multer({
   fileFilter: fileFilter
 });
 
-// Helper to convert image file to inlineData for Gemini
-function fileToGenerativePart(filePath, mimeType) {
-  return {
-    inlineData: {
-      data: Buffer.from(fs.readFileSync(filePath)).toString('base64'),
-      mimeType
+// Helper for Gemini AI Completion
+async function callGeminiAI(userMsg, uploadedFile) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey.trim() === '') {
+    return '⚠️ GEMINI_API_KEY is not configured in your server environment variables. Please add your GEMINI_API_KEY in your hosting dashboard (e.g. Render Settings > Environment).';
+  }
+
+  const promptText = userMsg || 'Please analyze this image.';
+  const candidateModels = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+
+  // Try using @google/genai SDK first
+  for (const modelName of candidateModels) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      
+      let contents;
+      if (uploadedFile && fs.existsSync(uploadedFile.path)) {
+        const fileBuffer = fs.readFileSync(uploadedFile.path);
+        const base64Data = Buffer.from(fileBuffer).toString('base64');
+        contents = [
+          { text: promptText },
+          {
+            inlineData: {
+              mimeType: uploadedFile.mimetype,
+              data: base64Data
+            }
+          }
+        ];
+      } else {
+        contents = promptText;
+      }
+
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: contents,
+        config: {
+          systemInstruction: 'You are an intelligent, helpful, and friendly AI assistant. Provide clear, well-structured answers.'
+        }
+      });
+
+      if (response && response.text) {
+        return response.text;
+      }
+    } catch (sdkError) {
+      console.warn(`@google/genai failed with model ${modelName}:`, sdkError.message);
     }
-  };
+  }
+
+  // Fallback to @google/generative-ai SDK
+  for (const modelName of candidateModels) {
+    try {
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: modelName });
+
+      if (uploadedFile && fs.existsSync(uploadedFile.path)) {
+        const fileBuffer = fs.readFileSync(uploadedFile.path);
+        const imagePart = {
+          inlineData: {
+            data: Buffer.from(fileBuffer).toString('base64'),
+            mimeType: uploadedFile.mimetype
+          }
+        };
+        const result = await model.generateContent([promptText, imagePart]);
+        const response = await result.response;
+        return response.text();
+      } else {
+        const result = await model.generateContent(promptText);
+        const response = await result.response;
+        return response.text();
+      }
+    } catch (fallbackError) {
+      console.warn(`@google/generative-ai failed with model ${modelName}:`, fallbackError.message);
+    }
+  }
+
+  return '⚠️ Unable to connect to Gemini AI. Please verify your GEMINI_API_KEY and API quotas in Google AI Studio.';
 }
 
 // ==========================================
@@ -86,7 +148,7 @@ router.get('/api/conversations', async (req, res) => {
     return res.json({ success: true, conversations });
   } catch (error) {
     console.error('Error fetching conversations:', error);
-    return res.status(500).json({ error: 'Failed to load chat history.' });
+    return res.status(500).json({ error: 'Failed to load chat history: ' + error.message });
   }
 });
 
@@ -101,13 +163,17 @@ router.post('/api/conversations', async (req, res) => {
     return res.status(201).json({ success: true, conversation });
   } catch (error) {
     console.error('Error creating conversation:', error);
-    return res.status(500).json({ error: 'Failed to create new chat session.' });
+    return res.status(500).json({ error: 'Failed to create new chat session: ' + error.message });
   }
 });
 
 // GET /api/conversations/:id/messages - Get all messages for a conversation
 router.get('/api/conversations/:id/messages', async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid conversation ID.' });
+    }
+
     const conversation = await Conversation.findOne({
       _id: req.params.id,
       userId: req.user._id
@@ -129,13 +195,17 @@ router.get('/api/conversations/:id/messages', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching conversation messages:', error);
-    return res.status(500).json({ error: 'Failed to load conversation messages.' });
+    return res.status(500).json({ error: 'Failed to load conversation messages: ' + error.message });
   }
 });
 
 // DELETE /api/conversations/:id - Delete a conversation and all its messages
 router.delete('/api/conversations/:id', async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid conversation ID.' });
+    }
+
     const conversation = await Conversation.findOneAndDelete({
       _id: req.params.id,
       userId: req.user._id
@@ -154,7 +224,7 @@ router.delete('/api/conversations/:id', async (req, res) => {
     return res.json({ success: true, message: 'Conversation deleted.' });
   } catch (error) {
     console.error('Error deleting conversation:', error);
-    return res.status(500).json({ error: 'Failed to delete conversation.' });
+    return res.status(500).json({ error: 'Failed to delete conversation: ' + error.message });
   }
 });
 
@@ -193,12 +263,11 @@ router.post('/chat', (req, res, next) => {
 
     // Ensure or create conversation
     let conversation;
-    if (conversationId) {
+    if (conversationId && mongoose.Types.ObjectId.isValid(conversationId)) {
       conversation = await Conversation.findOne({ _id: conversationId, userId: req.user._id });
     }
 
     if (!conversation) {
-      // Auto generate title from first message
       const initialTitle = userMsg
         ? (userMsg.length > 35 ? userMsg.substring(0, 35) + '...' : userMsg)
         : (uploadedFile ? 'Image Analysis' : 'New Chat');
@@ -216,62 +285,44 @@ router.post('/chat', (req, res, next) => {
     const imageUrl = uploadedFile ? `/uploads/${uploadedFile.filename}` : '';
 
     // Save user message to MongoDB
-    const userMessageDoc = await Message.create({
-      conversationId: conversation._id,
-      userId: req.user._id,
-      sender: 'user',
-      text: userMsg,
-      imageUrl: imageUrl
-    });
-
-    // Prepare contents for Gemini
-    let geminiResponse;
+    let userMessageDoc;
     try {
-      if (uploadedFile) {
-        // Multimodal Vision Call
-        const imagePart = fileToGenerativePart(uploadedFile.path, uploadedFile.mimetype);
-        const promptText = userMsg || 'Please analyze this image in detail.';
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: [
-            promptText,
-            imagePart
-          ],
-          config: {
-            systemInstruction: 'You are an intelligent, helpful, and friendly AI assistant with strong vision capabilities. Provide clear, structured, and helpful responses.'
-          }
-        });
-        geminiResponse = response.text || 'I analyzed the image, but could not generate a textual description.';
-      } else {
-        // Text-only Call
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: userMsg,
-          config: {
-            systemInstruction: 'You are a knowledgeable and friendly AI assistant. Give helpful, accurate, and concise answers with clear formatting.'
-          }
-        });
-        geminiResponse = response.text || 'No response generated.';
-      }
-    } catch (apiError) {
-      console.error('Gemini API Error:', apiError);
-      geminiResponse = 'Sorry, there was an issue communicating with the AI service. Please check your API key or try again in a moment.';
+      userMessageDoc = await Message.create({
+        conversationId: conversation._id,
+        userId: req.user._id,
+        sender: 'user',
+        text: userMsg,
+        imageUrl: imageUrl
+      });
+    } catch (dbErr) {
+      console.error('Error saving user message to MongoDB:', dbErr);
     }
 
+    // Call Gemini AI
+    const geminiResponse = await callGeminiAI(userMsg, uploadedFile);
+
     // Save bot reply to MongoDB
-    const botMessageDoc = await Message.create({
-      conversationId: conversation._id,
-      userId: req.user._id,
-      sender: 'bot',
-      text: geminiResponse,
-      imageUrl: '',
-      isGeneratedImage: false
-    });
+    let botMessageDoc;
+    try {
+      botMessageDoc = await Message.create({
+        conversationId: conversation._id,
+        userId: req.user._id,
+        sender: 'bot',
+        text: geminiResponse,
+        imageUrl: '',
+        isGeneratedImage: false
+      });
+    } catch (dbErr) {
+      console.error('Error saving bot reply to MongoDB:', dbErr);
+    }
 
     // Update conversation timestamp
-    conversation.updatedAt = Date.now();
-    await conversation.save();
+    try {
+      conversation.updatedAt = new Date();
+      await conversation.save();
+    } catch (dbErr) {
+      console.error('Error updating conversation timestamp:', dbErr);
+    }
 
     return res.json({
       success: true,
@@ -284,7 +335,7 @@ router.post('/chat', (req, res, next) => {
 
   } catch (error) {
     console.error('Chat endpoint error:', error);
-    return res.status(500).json({ error: 'Server error processing your message.' });
+    return res.status(500).json({ error: error.message || 'Server error processing your message.' });
   }
 });
 
@@ -300,7 +351,7 @@ async function handleImageGeneration(req, res, prompt, conversationId) {
 
     // Ensure conversation exists
     let conversation;
-    if (conversationId) {
+    if (conversationId && mongoose.Types.ObjectId.isValid(conversationId)) {
       conversation = await Conversation.findOne({ _id: conversationId, userId: req.user._id });
     }
 
@@ -316,57 +367,77 @@ async function handleImageGeneration(req, res, prompt, conversationId) {
     }
 
     // Save user prompt message
-    const userMessageDoc = await Message.create({
-      conversationId: conversation._id,
-      userId: req.user._id,
-      sender: 'user',
-      text: `/image ${prompt}`,
-      imageUrl: ''
-    });
+    let userMessageDoc;
+    try {
+      userMessageDoc = await Message.create({
+        conversationId: conversation._id,
+        userId: req.user._id,
+        sender: 'user',
+        text: `/image ${prompt}`,
+        imageUrl: ''
+      });
+    } catch (dbErr) {
+      console.error('DB Error:', dbErr);
+    }
 
     // Call OpenAI DALL-E
     let generatedImageUrl = '';
     let botReplyText = `Generated image for prompt: "${prompt}"`;
 
-    try {
-      const openai = getOpenAIClient();
-      let response;
+    if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.trim() === '') {
+      botReplyText = '⚠️ OPENAI_API_KEY is not configured in your server environment variables. Please add your OPENAI_API_KEY in your hosting dashboard (e.g. Render Settings > Environment) to generate images.';
+    } else {
       try {
-        response = await openai.images.generate({
-          model: 'dall-e-3',
-          prompt: prompt,
-          n: 1,
-          size: '1024x1024',
-          quality: 'standard'
-        });
-      } catch (dalle3Err) {
-        console.warn('DALL-E 3 error, falling back to DALL-E 2:', dalle3Err.message);
-        response = await openai.images.generate({
-          model: 'dall-e-2',
-          prompt: prompt,
-          n: 1,
-          size: '512x512'
-        });
-      }
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        let response;
+        try {
+          response = await openai.images.generate({
+            model: 'dall-e-3',
+            prompt: prompt,
+            n: 1,
+            size: '1024x1024',
+            quality: 'standard'
+          });
+        } catch (dalle3Err) {
+          console.warn('DALL-E 3 error, falling back to DALL-E 2:', dalle3Err.message);
+          response = await openai.images.generate({
+            model: 'dall-e-2',
+            prompt: prompt,
+            n: 1,
+            size: '512x512'
+          });
+        }
 
-      generatedImageUrl = response.data[0].url;
-    } catch (openaiErr) {
-      console.error('OpenAI Image Generation Error:', openaiErr);
-      botReplyText = `Image generation failed: ${openaiErr.message || 'OpenAI API error. Please verify your OPENAI_API_KEY.'}`;
+        if (response && response.data && response.data[0]) {
+          generatedImageUrl = response.data[0].url;
+        }
+      } catch (openaiErr) {
+        console.error('OpenAI Image Generation Error:', openaiErr);
+        botReplyText = `⚠️ Image generation failed: ${openaiErr.message || 'OpenAI API error'}`;
+      }
     }
 
     // Save bot message with generated image
-    const botMessageDoc = await Message.create({
-      conversationId: conversation._id,
-      userId: req.user._id,
-      sender: 'bot',
-      text: botReplyText,
-      imageUrl: generatedImageUrl,
-      isGeneratedImage: !!generatedImageUrl
-    });
+    let botMessageDoc;
+    try {
+      botMessageDoc = await Message.create({
+        conversationId: conversation._id,
+        userId: req.user._id,
+        sender: 'bot',
+        text: botReplyText,
+        imageUrl: generatedImageUrl,
+        isGeneratedImage: !!generatedImageUrl
+      });
+    } catch (dbErr) {
+      console.error('DB Error:', dbErr);
+    }
 
-    conversation.updatedAt = Date.now();
-    await conversation.save();
+    try {
+      conversation.updatedAt = new Date();
+      await conversation.save();
+    } catch (dbErr) {
+      console.error('DB Error:', dbErr);
+    }
 
     return res.json({
       success: true,

@@ -11,21 +11,9 @@ const conversationSchema = new mongoose.Schema({
     type: String,
     default: 'New Chat',
     trim: true
-  },
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
   }
-});
-
-// Update the updatedAt timestamp before saving
-conversationSchema.pre('save', function (next) {
-  this.updatedAt = Date.now();
-  if (next) next();
+}, {
+  timestamps: true
 });
 
 module.exports = mongoose.model('Conversation', conversationSchema);
