@@ -163,7 +163,7 @@
               <i data-lucide="eye"></i>
             </button>
           </div>
-          <span class="form-hint">Must be at least 6 characters</span>
+          <span class="form-hint">Must be at least 6 characters long</span>
         </div>
 
         <button type="submit" id="signup-submit-btn" class="btn btn-primary btn-block">
@@ -179,9 +179,9 @@
           <label for="forgot-email">Enter Registered Email</label>
           <div class="input-wrapper">
             <i data-lucide="mail" class="input-icon"></i>
-            <input type="email" id="forgot-email" placeholder="student@example.com" required>
+            <input type="email" id="forgot-email" placeholder="you@example.com" required>
           </div>
-          <span class="form-hint">A 4-digit verification code will be sent to your email.</span>
+          <span class="form-hint">A secure 4-digit verification code will be sent to your email.</span>
         </div>
 
         <button type="submit" id="send-otp-btn" class="btn btn-primary btn-block">
@@ -204,7 +204,7 @@
         <div class="email-sent-notice">
           <i data-lucide="mail-check"></i>
           <div>
-            We sent a 4-digit code to <strong id="screen-user-email">your email</strong>. Please check your inbox (and spam folder) and enter it below.
+            We sent a 4-digit OTP to <strong id="screen-user-email">your email</strong>. Please check your inbox (and spam folder) and enter it below.
           </div>
         </div>
 
@@ -214,7 +214,7 @@
             <i data-lucide="key-round" class="input-icon"></i>
             <input type="text" id="otp-input" placeholder="••••" maxlength="4" pattern="\d{4}" required autocomplete="one-time-code" style="letter-spacing: 6px; font-weight: 700; font-size: 18px; text-align: center;">
           </div>
-          <span class="form-hint">4-digit code expires in 10 minutes</span>
+          <span class="form-hint">4-digit code is valid for 10 minutes</span>
         </div>
 
         <button type="submit" id="verify-otp-btn" class="btn btn-primary btn-block">
@@ -285,7 +285,7 @@
     lucide.createIcons();
 
     let recoveryEmail = '';
-    let verifiedOtp = '';
+    let activeResetToken = '';
 
     // Theme Management
     const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -379,7 +379,7 @@
       document.getElementById('auth-alert').classList.add('hidden');
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 18000);
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
 
       try {
         const res = await fetch('/api/auth/forgot-password', {
@@ -402,14 +402,14 @@
           document.getElementById('forgot-step2-form').classList.remove('hidden');
 
           document.getElementById('otp-input').value = '';
-          showAlert(`4-digit OTP sent to ${email}. Please check your inbox and enter it below!`, 'success');
+          showAlert(`A 4-digit OTP has been sent to ${email}. Please check your inbox and enter it below!`, 'success');
           document.getElementById('otp-input').focus();
         }
       } catch (err) {
         if (err.name === 'AbortError') {
-          showAlert('Request timed out. Please check your network connection.');
+          showAlert('Request took longer than expected. Please check your connection or try again.');
         } else {
-          showAlert('Network error. Could not connect to server.');
+          showAlert('Network error: Could not reach the server. Please check your connection.');
         }
       } finally {
         setBtnLoading(submitBtn, false);
@@ -440,7 +440,7 @@
         if (!res.ok || !data.success) {
           showAlert(data.error || 'Invalid 4-digit OTP. Please check your email and try again.');
         } else {
-          verifiedOtp = otp;
+          activeResetToken = data.resetToken || '';
           hideAllForms();
           document.getElementById('auth-tabs').classList.add('hidden');
           document.getElementById('forgot-step3-form').classList.remove('hidden');
@@ -484,7 +484,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             email: recoveryEmail,
-            otp: verifiedOtp,
+            resetToken: activeResetToken,
             newPassword,
             confirmPassword
           })

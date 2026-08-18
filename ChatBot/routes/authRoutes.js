@@ -80,7 +80,7 @@ router.post('/api/auth/signup', async (req, res) => {
           return res.status(400).json({ error: 'An account with this email already exists.' });
         }
 
-        // If duplicate key error occurred on an old/legacy index (e.g. username_1), drop that index and retry!
+        // If duplicate key error occurred on an old/legacy index (e.g. username_1), drop that index and retry
         try {
           const usersCollection = mongoose.connection.collection('users');
           const indexes = await usersCollection.indexes();
@@ -170,7 +170,7 @@ router.post('/api/auth/login', async (req, res) => {
 });
 
 // ==========================================
-// 4. UNIVERSAL MULTI-USER EMAIL DISPATCHER
+// 4. FAST, NON-BLOCKING UNIVERSAL EMAIL DISPATCHER
 // ==========================================
 async function sendPasswordResetEmail(toEmail, otp) {
   const targetRecipient = (toEmail || '').trim().toLowerCase();
@@ -195,35 +195,13 @@ async function sendPasswordResetEmail(toEmail, otp) {
   const emailUser = (process.env.EMAIL_USER || process.env.GMAIL_USER || '').trim();
   const emailPass = (process.env.EMAIL_PASS || process.env.GMAIL_PASS || '').replace(/\s+/g, '');
 
-  console.log(`📨 [EMAIL DISPATCH INITIATED] Target Recipient: ${targetRecipient} | Configured Sender: ${emailUser || 'None'}`);
+  console.log(`📨 [EMAIL DISPATCH INITIATED] Target: ${targetRecipient} | Sender: ${emailUser || 'None'}`);
 
-  // Provider 1: Gmail Nodemailer (Transports to ANY email address worldwide)
-  if (emailUser && emailPass) {
-    // 1A. Try standard Gmail Service
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: emailUser,
-          pass: emailPass
-        },
-        family: 4
-      });
-
-      await transporter.sendMail({
-        from: `"AI Chatbot Security" <${emailUser}>`,
-        to: targetRecipient,
-        subject: subject,
-        text: textContent,
-        html: htmlContent
-      });
-
-      console.log(`✅ [EMAIL DELIVERED via Gmail Service] Recipient: ${targetRecipient}`);
-      return { success: true, provider: 'gmail-service' };
-    } catch (gmailServiceErr) {
-      console.warn(`⚠️ [Gmail Service Transport Notice] Recipient: ${targetRecipient} | Error: ${gmailServiceErr.message}`);
-
-      // 1B. Try explicit Port 465 (SSL IPv4)
+  // Internal dispatch executor with per-attempt fast timeouts (3.5s max each)
+  const executeDispatch = async () => {
+    // 1. Gmail SMTP (Sends to ANY email address worldwide)
+    if (emailUser && emailPass) {
+      // 1A. Try Gmail Direct SSL (Port 465) with 3.5s timeout
       try {
         const sslTransporter = nodemailer.createTransport({
           host: 'smtp.gmail.com',
@@ -231,9 +209,9 @@ async function sendPasswordResetEmail(toEmail, otp) {
           secure: true,
           family: 4,
           auth: { user: emailUser, pass: emailPass },
-          connectionTimeout: 7000,
-          greetingTimeout: 7000,
-          socketTimeout: 8000
+          connectionTimeout: 3500,
+          greetingTimeout: 3500,
+          socketTimeout: 4000
         });
 
         await sslTransporter.sendMail({
@@ -244,12 +222,12 @@ async function sendPasswordResetEmail(toEmail, otp) {
           html: htmlContent
         });
 
-        console.log(`✅ [EMAIL DELIVERED via Gmail SSL 465] Recipient: ${targetRecipient}`);
+        console.log(`✅ [EMAIL DELIVERED via Gmail Port 465] Recipient: ${targetRecipient}`);
         return { success: true, provider: 'gmail-ssl' };
       } catch (sslErr) {
-        console.warn(`⚠️ [Gmail SSL 465 Transport Notice] Recipient: ${targetRecipient} | Error: ${sslErr.message}`);
+        console.warn(`⚠️ [Gmail SSL 465 Notice] ${sslErr.message}`);
 
-        // 1C. Try explicit Port 587 (TLS IPv4)
+        // 1B. Try Gmail TLS (Port 587) with 3.5s timeout
         try {
           const tlsTransporter = nodemailer.createTransport({
             host: 'smtp.gmail.com',
@@ -258,9 +236,9 @@ async function sendPasswordResetEmail(toEmail, otp) {
             requireTLS: true,
             family: 4,
             auth: { user: emailUser, pass: emailPass },
-            connectionTimeout: 7000,
-            greetingTimeout: 7000,
-            socketTimeout: 8000
+            connectionTimeout: 3500,
+            greetingTimeout: 3500,
+            socketTimeout: 4000
           });
 
           await tlsTransporter.sendMail({
@@ -271,82 +249,96 @@ async function sendPasswordResetEmail(toEmail, otp) {
             html: htmlContent
           });
 
-          console.log(`✅ [EMAIL DELIVERED via Gmail TLS 587] Recipient: ${targetRecipient}`);
+          console.log(`✅ [EMAIL DELIVERED via Gmail Port 587] Recipient: ${targetRecipient}`);
           return { success: true, provider: 'gmail-tls' };
         } catch (tlsErr) {
-          console.warn(`⚠️ [Gmail TLS 587 Transport Notice] Recipient: ${targetRecipient} | Error: ${tlsErr.message}`);
+          console.warn(`⚠️ [Gmail TLS 587 Notice] ${tlsErr.message}`);
         }
       }
     }
-  }
 
-  // Provider 2: Brevo HTTPS API (Port 443 — works with all recipients)
-  if (process.env.BREVO_API_KEY && process.env.BREVO_API_KEY.trim()) {
-    try {
-      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-        method: 'POST',
-        headers: {
-          'api-key': process.env.BREVO_API_KEY.trim(),
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          sender: { name: 'AI Chatbot Security', email: emailUser || 'no-reply@aichatbot.com' },
-          to: [{ email: targetRecipient }],
-          subject: subject,
-          textContent: textContent,
-          htmlContent: htmlContent
-        })
-      });
+    // 2. Brevo HTTPS API (Port 443 — works with all recipients)
+    if (process.env.BREVO_API_KEY && process.env.BREVO_API_KEY.trim()) {
+      try {
+        const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: {
+            'api-key': process.env.BREVO_API_KEY.trim(),
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            sender: { name: 'AI Chatbot Security', email: emailUser || 'no-reply@aichatbot.com' },
+            to: [{ email: targetRecipient }],
+            subject: subject,
+            textContent: textContent,
+            htmlContent: htmlContent
+          }),
+          signal: AbortSignal.timeout(4000)
+        });
 
-      if (res.ok) {
-        console.log(`✅ [EMAIL DELIVERED via Brevo API] Recipient: ${targetRecipient}`);
-        return { success: true, provider: 'brevo' };
-      } else {
-        const errData = await res.json();
-        console.warn(`⚠️ [Brevo API Response Notice] Recipient: ${targetRecipient} | Response:`, errData);
+        if (res.ok) {
+          console.log(`✅ [EMAIL DELIVERED via Brevo API] Recipient: ${targetRecipient}`);
+          return { success: true, provider: 'brevo' };
+        }
+      } catch (brevoErr) {
+        console.warn(`⚠️ [Brevo API Notice] ${brevoErr.message}`);
       }
-    } catch (brevoErr) {
-      console.warn(`⚠️ [Brevo API Error] Recipient: ${targetRecipient} | Error: ${brevoErr.message}`);
     }
-  }
 
-  // Provider 3: Resend HTTPS API (Port 443)
-  if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim()) {
-    try {
-      const fromAddress = (process.env.RESEND_FROM || '').trim() || 'AI Chatbot <onboarding@resend.dev>';
-      const res = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.RESEND_API_KEY.trim()}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          from: fromAddress,
-          to: [targetRecipient],
-          subject: subject,
-          text: textContent,
-          html: htmlContent
-        })
-      });
+    // 3. Resend HTTPS API (Port 443)
+    if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim()) {
+      try {
+        const fromAddress = (process.env.RESEND_FROM || '').trim() || 'AI Chatbot <onboarding@resend.dev>';
+        const res = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.RESEND_API_KEY.trim()}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            from: fromAddress,
+            to: [targetRecipient],
+            subject: subject,
+            text: textContent,
+            html: htmlContent
+          }),
+          signal: AbortSignal.timeout(4000)
+        });
 
-      if (res.ok) {
-        console.log(`✅ [EMAIL DELIVERED via Resend API] Recipient: ${targetRecipient}`);
-        return { success: true, provider: 'resend' };
-      } else {
-        const errData = await res.json();
-        console.warn(`⚠️ [Resend API Response Notice] Recipient: ${targetRecipient} | Response:`, errData);
+        if (res.ok) {
+          console.log(`✅ [EMAIL DELIVERED via Resend API] Recipient: ${targetRecipient}`);
+          return { success: true, provider: 'resend' };
+        }
+      } catch (resendErr) {
+        console.warn(`⚠️ [Resend API Notice] ${resendErr.message}`);
       }
-    } catch (resendErr) {
-      console.warn(`⚠️ [Resend API Error] Recipient: ${targetRecipient} | Error: ${resendErr.message}`);
     }
-  }
 
-  console.error(`❌ [ALL EMAIL PROVIDERS FAILED] Recipient: ${targetRecipient} | EMAIL_USER present: ${!!emailUser} | EMAIL_PASS present: ${!!emailPass} | RESEND present: ${!!process.env.RESEND_API_KEY}`);
-
-  return {
-    success: false,
-    error: 'Email delivery failed. Please ensure your EMAIL_USER and EMAIL_PASS (Gmail App Password) are configured in your Render environment variables.'
+    return {
+      success: false,
+      error: 'Email delivery failed. Please verify EMAIL_USER and EMAIL_PASS (Gmail App Password) in your Render environment variables.'
+    };
   };
+
+  // Enforce strict 7.5-second total timeout so the HTTP request never hangs
+  try {
+    const timeoutPromise = new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({
+          success: false,
+          error: 'Email delivery timed out. Please verify your EMAIL_USER and EMAIL_PASS in Render.'
+        });
+      }, 7500);
+    });
+
+    return await Promise.race([executeDispatch(), timeoutPromise]);
+  } catch (err) {
+    console.error('Email dispatch exception:', err.message);
+    return {
+      success: false,
+      error: 'Email service error: ' + err.message
+    };
+  }
 }
 
 // ==========================================
@@ -393,7 +385,7 @@ router.post('/api/auth/forgot-password', async (req, res) => {
     user.lastOtpSentAt = new Date();
     await user.save();
 
-    // Dispatch email strictly to this user's registered address
+    // Dispatch email strictly to this user's registered address (with 7.5s max timeout)
     const sendResult = await sendPasswordResetEmail(user.email, otp);
 
     if (sendResult && sendResult.success) {
@@ -405,7 +397,7 @@ router.post('/api/auth/forgot-password', async (req, res) => {
     }
 
     return res.status(500).json({
-      error: sendResult.error || 'Failed to send OTP email. Please ensure your email credentials are set in Render.'
+      error: sendResult.error || 'Failed to send OTP email. Please check your email credentials on Render.'
     });
 
   } catch (error) {

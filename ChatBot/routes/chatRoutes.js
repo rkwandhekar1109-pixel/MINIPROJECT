@@ -56,26 +56,29 @@ const upload = multer({
   fileFilter: fileFilter
 });
 
-// Helper for Gemini AI Completion
+// Helper for Gemini AI Completion with strict fast timeouts
 async function callGeminiAI(userMsg, uploadedFile) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey.trim() === '') {
-    return '⚠️ GEMINI_API_KEY is not configured in your server environment variables. Please add your GEMINI_API_KEY in your hosting dashboard (e.g. Render Settings > Environment).';
+    return '⚠️ GEMINI_API_KEY is not configured in your server environment variables. Please add your GEMINI_API_KEY in your Render dashboard (Settings > Environment).';
   }
 
   const promptText = userMsg || 'Please analyze this image.';
   let lastError = null;
 
+  // Active official Google Gemini models
   const candidateModels = [
     process.env.GEMINI_MODEL,
-    'gemini-3.6-flash',
-    'gemini-3.6-pro',
-    'gemini-3.7-flash',
-    'gemini-3.5-flash',
-    'gemini-3.0-flash'
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+    'gemini-1.5-pro'
   ].filter(Boolean);
 
-  // Try using @google/genai SDK first
+  // Helper with 10-second timeout per attempt
+  const timeoutPromise = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini API timeout')), ms));
+
+  // 1. Try using @google/genai SDK
   for (const modelName of candidateModels) {
     try {
       const ai = new GoogleGenAI({ apiKey });
@@ -97,27 +100,29 @@ async function callGeminiAI(userMsg, uploadedFile) {
         contents = promptText;
       }
 
-      const response = await ai.models.generateContent({
+      const generatePromise = ai.models.generateContent({
         model: modelName,
         contents: contents
       });
+
+      const response = await Promise.race([generatePromise, timeoutPromise(9000)]);
 
       if (response && response.text) {
         return response.text;
       }
     } catch (sdkError) {
-      console.warn(`@google/genai failed with model ${modelName}:`, sdkError.message);
+      console.warn(`@google/genai attempt on ${modelName} notice:`, sdkError.message);
       lastError = sdkError;
     }
   }
 
-  // Fallback to @google/generative-ai SDK
+  // 2. Fallback to @google/generative-ai SDK
   for (const modelName of candidateModels) {
     try {
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ model: modelName });
 
-      let result;
+      let generatePromise;
       if (uploadedFile && fs.existsSync(uploadedFile.path)) {
         const fileBuffer = fs.readFileSync(uploadedFile.path);
         const imagePart = {
@@ -126,23 +131,24 @@ async function callGeminiAI(userMsg, uploadedFile) {
             mimeType: uploadedFile.mimetype
           }
         };
-        result = await model.generateContent([promptText, imagePart]);
+        generatePromise = model.generateContent([promptText, imagePart]);
       } else {
-        result = await model.generateContent(promptText);
+        generatePromise = model.generateContent(promptText);
       }
 
+      const result = await Promise.race([generatePromise, timeoutPromise(9000)]);
       const response = await result.response;
       const text = response.text();
       if (text) {
         return text;
       }
     } catch (altError) {
-      console.warn(`@google/generative-ai failed with model ${modelName}:`, altError.message);
+      console.warn(`@google/generative-ai attempt on ${modelName} notice:`, altError.message);
       lastError = altError;
     }
   }
 
-  return `⚠️ Unable to connect to Gemini AI (${lastError ? lastError.message : 'Model error'}). Please verify your GEMINI_API_KEY in Render.`;
+  return `⚠️ Unable to reach Gemini AI (${lastError ? lastError.message : 'Timeout'}). Please verify your GEMINI_API_KEY in Render.`;
 }
 
 // ==========================================
@@ -192,7 +198,7 @@ async function generateAIImage(prompt) {
           quality: 'standard'
         });
       } catch (dalle3Err) {
-        console.warn('DALL-E 3 error, falling back to DALL-E 2:', dalle3Err.message);
+        console.warn('DALL-E 3 notice, trying DALL-E 2:', dalle3Err.message);
         response = await openai.images.generate({
           model: 'dall-e-2',
           prompt: prompt,
@@ -202,9 +208,8 @@ async function generateAIImage(prompt) {
       }
 
       if (response && response.data && response.data[0] && response.data[0].url) {
-        // Download and cache image locally to avoid expiring temporary URLs
         try {
-          const imgFetch = await fetch(response.data[0].url);
+          const imgFetch = await fetch(response.data[0].url, { signal: AbortSignal.timeout(8000) });
           if (imgFetch.ok) {
             const buffer = Buffer.from(await imgFetch.arrayBuffer());
             const filename = `dalle-${Date.now()}-${Math.round(Math.random() * 1e6)}.png`;
@@ -216,7 +221,6 @@ async function generateAIImage(prompt) {
             };
           }
         } catch (downloadErr) {
-          console.warn('Could not save DALL-E image locally, using remote URL:', downloadErr.message);
           return {
             imageUrl: response.data[0].url,
             provider: 'DALL·E 3'
@@ -224,18 +228,19 @@ async function generateAIImage(prompt) {
         }
       }
     } catch (openaiErr) {
-      console.warn('OpenAI Image Generation Error, falling back to AI engine:', openaiErr.message);
+      console.warn('OpenAI Image Generation Notice:', openaiErr.message);
     }
   }
 
   // Strategy 2: High-Definition AI Engine (Pollinations / Stable Diffusion HD)
-  try {
-    const seed = Math.floor(Math.random() * 1e9);
-    const encodedPrompt = encodeURIComponent(prompt);
-    const remoteUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${seed}&model=flux`;
+  const seed = Math.floor(Math.random() * 1e9);
+  const encodedPrompt = encodeURIComponent(prompt);
+  const remoteUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${seed}&model=flux`;
 
+  try {
     const imgRes = await fetch(remoteUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      signal: AbortSignal.timeout(10000)
     });
 
     if (imgRes.ok) {
@@ -249,15 +254,14 @@ async function generateAIImage(prompt) {
       };
     }
   } catch (hdErr) {
-    console.warn('High-Def AI generator fetch error, using direct stream URL:', hdErr.message);
-    const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true&seed=${Math.floor(Math.random() * 1e9)}`;
-    return {
-      imageUrl: fallbackUrl,
-      provider: 'AI Vision Engine'
-    };
+    console.warn('High-Def AI generator buffer notice, streaming direct URL:', hdErr.message);
   }
 
-  throw new Error('All image generation services are currently unavailable. Please try again in a few moments.');
+  // Return instant direct image stream URL if buffer timed out
+  return {
+    imageUrl: remoteUrl,
+    provider: 'AI Vision Engine'
+  };
 }
 
 // ==========================================
