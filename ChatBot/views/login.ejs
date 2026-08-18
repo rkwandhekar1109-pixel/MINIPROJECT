@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Chatbot — Authentication</title>
+  <title>AI Chatbot — Authentication & Recovery</title>
   <!-- Google Fonts: Plus Jakarta Sans -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,6 +11,83 @@
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="/style.css">
+  <style>
+    .forgot-link-wrapper {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: -6px;
+      margin-bottom: 4px;
+    }
+    .forgot-link {
+      font-size: 12.5px;
+      color: var(--accent-primary);
+      text-decoration: none;
+      font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    .forgot-link:hover {
+      text-decoration: underline;
+      opacity: 0.9;
+    }
+    .otp-display-card {
+      background: rgba(59, 130, 246, 0.12);
+      border: 2px dashed #3b82f6;
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      text-align: center;
+      margin-bottom: 16px;
+      animation: fadeIn 0.3s ease;
+    }
+    .otp-label {
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+    .otp-code-value {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: 10px;
+      color: #3b82f6;
+      font-family: monospace;
+      margin-left: 10px;
+    }
+    .otp-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .back-btn-wrapper {
+      margin-top: 14px;
+      text-align: center;
+    }
+    .back-to-login-btn {
+      background: none;
+      border: none;
+      font-size: 13px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+    }
+    .back-to-login-btn:hover {
+      color: var(--text-primary);
+    }
+    .step-badge {
+      display: inline-block;
+      padding: 3px 8px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-full);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent-primary);
+      margin-bottom: 12px;
+    }
+  </style>
 </head>
 <body class="auth-body">
   <div class="auth-container">
@@ -25,8 +102,8 @@
 
     <!-- Auth Card -->
     <div class="auth-card">
-      <!-- Tabs -->
-      <div class="auth-tabs">
+      <!-- Tabs (visible for login & signup) -->
+      <div class="auth-tabs" id="auth-tabs">
         <button type="button" class="tab-btn <%= (typeof mode !== 'undefined' && mode === 'signup') ? '' : 'active' %>" id="tab-login" onclick="switchAuthMode('login')">
           <i data-lucide="log-in"></i> Log In
         </button>
@@ -41,7 +118,7 @@
         <span id="auth-alert-text"></span>
       </div>
 
-      <!-- Login Form -->
+      <!-- 1. LOGIN FORM -->
       <form id="login-form" class="auth-form <%= (typeof mode !== 'undefined' && mode === 'signup') ? 'hidden' : '' %>" onsubmit="handleAuthSubmit(event, 'login')">
         <div class="form-group">
           <label for="login-email">Email Address</label>
@@ -62,13 +139,18 @@
           </div>
         </div>
 
+        <!-- Forgot Password Link -->
+        <div class="forgot-link-wrapper">
+          <a href="#" class="forgot-link" onclick="openForgotPassword(event)">Forgot Password?</a>
+        </div>
+
         <button type="submit" id="login-submit-btn" class="btn btn-primary btn-block">
           <span class="btn-text">Log In</span>
           <span class="spinner hidden"></span>
         </button>
       </form>
 
-      <!-- Signup Form -->
+      <!-- 2. SIGNUP FORM -->
       <form id="signup-form" class="auth-form <%= (typeof mode !== 'undefined' && mode === 'signup') ? '' : 'hidden' %>" onsubmit="handleAuthSubmit(event, 'signup')">
         <div class="form-group">
           <label for="signup-email">Email Address</label>
@@ -95,6 +177,103 @@
           <span class="spinner hidden"></span>
         </button>
       </form>
+
+      <!-- 3. FORGOT PASSWORD STEP 1: Request OTP -->
+      <form id="forgot-step1-form" class="auth-form hidden" onsubmit="handleSendOtp(event)">
+        <div class="step-badge">Step 1 of 3: Account Recovery</div>
+        <div class="form-group">
+          <label for="forgot-email">Enter Registered Email</label>
+          <div class="input-wrapper">
+            <i data-lucide="mail" class="input-icon"></i>
+            <input type="email" id="forgot-email" placeholder="student@example.com" required>
+          </div>
+          <span class="form-hint">We will generate a 4-digit verification code.</span>
+        </div>
+
+        <button type="submit" id="send-otp-btn" class="btn btn-primary btn-block">
+          <span class="btn-text">Send 4-Digit OTP</span>
+          <span class="spinner hidden"></span>
+        </button>
+
+        <div class="back-btn-wrapper">
+          <button type="button" class="back-to-login-btn" onclick="switchAuthMode('login')">
+            <i data-lucide="arrow-left"></i> Back to Log In
+          </button>
+        </div>
+      </form>
+
+      <!-- 4. FORGOT PASSWORD STEP 2: Verify 4-Digit OTP -->
+      <form id="forgot-step2-form" class="auth-form hidden" onsubmit="handleVerifyOtp(event)">
+        <div class="step-badge">Step 2 of 3: OTP Verification</div>
+        
+        <!-- On-screen 4-Digit OTP Banner -->
+        <div class="otp-display-card" id="otp-display-card">
+          <div class="otp-label">📲 Your 4-Digit Verification OTP:</div>
+          <div class="otp-code-value" id="screen-otp-val">----</div>
+          <div class="otp-hint">Enter this 4-digit code in the box below.</div>
+        </div>
+
+        <div class="form-group">
+          <label for="otp-input">Enter 4-Digit OTP</label>
+          <div class="input-wrapper">
+            <i data-lucide="key-round" class="input-icon"></i>
+            <input type="text" id="otp-input" placeholder="4-digit code" maxlength="4" pattern="\d{4}" required style="letter-spacing: 4px; font-weight: 700; font-size: 16px;">
+          </div>
+        </div>
+
+        <button type="submit" id="verify-otp-btn" class="btn btn-primary btn-block">
+          <span class="btn-text">Verify OTP</span>
+          <span class="spinner hidden"></span>
+        </button>
+
+        <div class="back-btn-wrapper" style="display: flex; justify-content: space-between; align-items: center;">
+          <button type="button" class="back-to-login-btn" onclick="openForgotPassword(event)">
+            <i data-lucide="refresh-cw"></i> Resend
+          </button>
+          <button type="button" class="back-to-login-btn" onclick="switchAuthMode('login')">
+            <i data-lucide="arrow-left"></i> Back to Log In
+          </button>
+        </div>
+      </form>
+
+      <!-- 5. FORGOT PASSWORD STEP 3: Create New Password & Confirm Password -->
+      <form id="forgot-step3-form" class="auth-form hidden" onsubmit="handleResetPassword(event)">
+        <div class="step-badge">Step 3 of 3: Create New Password</div>
+
+        <div class="form-group">
+          <label for="new-password">Create New Password</label>
+          <div class="input-wrapper">
+            <i data-lucide="lock" class="input-icon"></i>
+            <input type="password" id="new-password" placeholder="At least 6 characters" required minlength="6" autocomplete="new-password">
+            <button type="button" class="toggle-pw-btn" onclick="togglePasswordVisibility('new-password', this)">
+              <i data-lucide="eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="confirm-password">Confirm Password</label>
+          <div class="input-wrapper">
+            <i data-lucide="check-circle" class="input-icon"></i>
+            <input type="password" id="confirm-password" placeholder="Re-enter new password" required minlength="6" autocomplete="new-password">
+            <button type="button" class="toggle-pw-btn" onclick="togglePasswordVisibility('confirm-password', this)">
+              <i data-lucide="eye"></i>
+            </button>
+          </div>
+          <span class="form-hint">Both passwords must match</span>
+        </div>
+
+        <button type="submit" id="reset-pw-btn" class="btn btn-primary btn-block">
+          <span class="btn-text">Update Password & Log In</span>
+          <span class="spinner hidden"></span>
+        </button>
+
+        <div class="back-btn-wrapper">
+          <button type="button" class="back-to-login-btn" onclick="switchAuthMode('login')">
+            <i data-lucide="arrow-left"></i> Back to Log In
+          </button>
+        </div>
+      </form>
     </div>
 
     <!-- Theme switch footer -->
@@ -108,6 +287,9 @@
   <script>
     // Initialize Lucide Icons
     lucide.createIcons();
+
+    let recoveryEmail = '';
+    let verifiedOtp = '';
 
     // Theme Management
     const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -142,24 +324,29 @@
       lucide.createIcons();
     }
 
+    function hideAllForms() {
+      document.getElementById('login-form').classList.add('hidden');
+      document.getElementById('signup-form').classList.add('hidden');
+      document.getElementById('forgot-step1-form').classList.add('hidden');
+      document.getElementById('forgot-step2-form').classList.add('hidden');
+      document.getElementById('forgot-step3-form').classList.add('hidden');
+      document.getElementById('auth-alert').classList.add('hidden');
+    }
+
     function switchAuthMode(mode) {
-      const loginForm = document.getElementById('login-form');
-      const signupForm = document.getElementById('signup-form');
+      hideAllForms();
+      document.getElementById('auth-tabs').classList.remove('hidden');
+
       const tabLogin = document.getElementById('tab-login');
       const tabSignup = document.getElementById('tab-signup');
-      const alertBox = document.getElementById('auth-alert');
-
-      alertBox.classList.add('hidden');
 
       if (mode === 'signup') {
-        loginForm.classList.add('hidden');
-        signupForm.classList.remove('hidden');
+        document.getElementById('signup-form').classList.remove('hidden');
         tabLogin.classList.remove('active');
         tabSignup.classList.add('active');
         window.history.replaceState({}, '', '/signup');
       } else {
-        signupForm.classList.add('hidden');
-        loginForm.classList.remove('hidden');
+        document.getElementById('login-form').classList.remove('hidden');
         tabSignup.classList.remove('active');
         tabLogin.classList.add('active');
         window.history.replaceState({}, '', '/login');
@@ -167,22 +354,159 @@
       lucide.createIcons();
     }
 
+    function openForgotPassword(e) {
+      if (e) e.preventDefault();
+      hideAllForms();
+      document.getElementById('auth-tabs').classList.add('hidden');
+      document.getElementById('forgot-step1-form').classList.remove('hidden');
+      
+      const loginEmailVal = document.getElementById('login-email').value;
+      if (loginEmailVal) {
+        document.getElementById('forgot-email').value = loginEmailVal;
+      }
+      lucide.createIcons();
+    }
+
+    // Step 1: Send OTP
+    async function handleSendOtp(e) {
+      e.preventDefault();
+      const email = document.getElementById('forgot-email').value.trim();
+      const submitBtn = document.getElementById('send-otp-btn');
+      
+      if (!email) {
+        showAlert('Please enter your email address.');
+        return;
+      }
+
+      setBtnLoading(submitBtn, true);
+
+      try {
+        const res = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          showAlert(data.error || 'Failed to send OTP.');
+        } else {
+          recoveryEmail = email;
+          // Display the 4-digit OTP directly on screen
+          document.getElementById('screen-otp-val').textContent = data.otp || '----';
+          
+          hideAllForms();
+          document.getElementById('auth-tabs').classList.add('hidden');
+          document.getElementById('forgot-step2-form').classList.remove('hidden');
+          showAlert(data.message || '4-digit OTP generated! Check screen/email.', 'success');
+          document.getElementById('otp-input').value = data.otp || '';
+        }
+      } catch (err) {
+        showAlert('Network error. Could not reach server.');
+      } finally {
+        setBtnLoading(submitBtn, false);
+      }
+    }
+
+    // Step 2: Verify OTP
+    async function handleVerifyOtp(e) {
+      e.preventDefault();
+      const otp = document.getElementById('otp-input').value.trim();
+      const submitBtn = document.getElementById('verify-otp-btn');
+
+      if (!otp || otp.length !== 4) {
+        showAlert('Please enter the 4-digit OTP.');
+        return;
+      }
+
+      setBtnLoading(submitBtn, true);
+
+      try {
+        const res = await fetch('/api/auth/verify-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: recoveryEmail, otp })
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          showAlert(data.error || 'Invalid OTP code.');
+        } else {
+          verifiedOtp = otp;
+          hideAllForms();
+          document.getElementById('auth-tabs').classList.add('hidden');
+          document.getElementById('forgot-step3-form').classList.remove('hidden');
+          showAlert('OTP verified! Please create your new password.', 'success');
+        }
+      } catch (err) {
+        showAlert('Network error. Could not verify OTP.');
+      } finally {
+        setBtnLoading(submitBtn, false);
+      }
+    }
+
+    // Step 3: Create New Password & Confirm Password
+    async function handleResetPassword(e) {
+      e.preventDefault();
+      const newPassword = document.getElementById('new-password').value;
+      const confirmPassword = document.getElementById('confirm-password').value;
+      const submitBtn = document.getElementById('reset-pw-btn');
+
+      if (!newPassword || !confirmPassword) {
+        showAlert('Please fill in both password fields.');
+        return;
+      }
+
+      if (newPassword !== confirmPassword) {
+        showAlert('New password and confirm password do not match.');
+        return;
+      }
+
+      if (newPassword.length < 6) {
+        showAlert('Password must be at least 6 characters long.');
+        return;
+      }
+
+      setBtnLoading(submitBtn, true);
+
+      try {
+        const res = await fetch('/api/auth/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: recoveryEmail,
+            otp: verifiedOtp,
+            newPassword,
+            confirmPassword
+          })
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          showAlert(data.error || 'Failed to update password.');
+        } else {
+          showAlert('Password updated successfully! Please log in.', 'success');
+          setTimeout(() => {
+            switchAuthMode('login');
+            document.getElementById('login-email').value = recoveryEmail;
+            document.getElementById('login-password').value = '';
+            showAlert('Password reset successful! You can now log in.', 'success');
+          }, 1200);
+        }
+      } catch (err) {
+        showAlert('Network error. Could not reset password.');
+      } finally {
+        setBtnLoading(submitBtn, false);
+      }
+    }
+
+    // Login & Signup Submission
     async function handleAuthSubmit(e, mode) {
       e.preventDefault();
-      const alertBox = document.getElementById('auth-alert');
-      const alertText = document.getElementById('auth-alert-text');
       const submitBtn = document.getElementById(`${mode}-submit-btn`);
-      const btnText = submitBtn.querySelector('.btn-text');
-      const spinner = submitBtn.querySelector('.spinner');
-
       const email = document.getElementById(`${mode}-email`).value.trim();
       const password = document.getElementById(`${mode}-password`).value;
 
-      alertBox.classList.add('hidden');
-      alertBox.classList.remove('alert-success');
-      alertBox.classList.add('alert-error');
-
-      // Basic client validation
       if (!email || !password) {
         showAlert('Please fill in all fields.');
         return;
@@ -193,10 +517,7 @@
         return;
       }
 
-      // Show loading state
-      submitBtn.disabled = true;
-      btnText.classList.add('hidden');
-      spinner.classList.remove('hidden');
+      setBtnLoading(submitBtn, true);
 
       try {
         const endpoint = mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
@@ -211,9 +532,6 @@
         if (!res.ok || !data.success) {
           showAlert(data.error || 'Authentication failed. Please try again.');
         } else {
-          // Success -> Redirect to chat
-          alertBox.classList.remove('alert-error');
-          alertBox.classList.add('alert-success');
           showAlert(mode === 'signup' ? 'Account created! Redirecting...' : 'Success! Redirecting...', 'success');
           setTimeout(() => {
             window.location.href = '/';
@@ -222,7 +540,18 @@
       } catch (err) {
         showAlert('Network error. Could not connect to the server.');
       } finally {
-        submitBtn.disabled = false;
+        setBtnLoading(submitBtn, false);
+      }
+    }
+
+    function setBtnLoading(btn, isLoading) {
+      const btnText = btn.querySelector('.btn-text');
+      const spinner = btn.querySelector('.spinner');
+      btn.disabled = isLoading;
+      if (isLoading) {
+        btnText.classList.add('hidden');
+        spinner.classList.remove('hidden');
+      } else {
         btnText.classList.remove('hidden');
         spinner.classList.add('hidden');
       }
@@ -232,7 +561,8 @@
       const alertBox = document.getElementById('auth-alert');
       const alertText = document.getElementById('auth-alert-text');
       alertText.textContent = message;
-      alertBox.classList.remove('hidden');
+      alertBox.classList.remove('hidden', 'alert-error', 'alert-success');
+      alertBox.classList.add(type === 'success' ? 'alert-success' : 'alert-error');
       lucide.createIcons();
     }
   </script>

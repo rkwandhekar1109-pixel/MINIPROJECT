@@ -397,7 +397,9 @@ async function handleImageGeneration(req, res, prompt, conversationId) {
     let botReplyText = `Generated image for prompt: "${prompt}"`;
 
     if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY.trim() === '') {
-      botReplyText = '⚠️ OPENAI_API_KEY is not configured in your server environment variables. Please add your OPENAI_API_KEY in your hosting dashboard (e.g. Render Settings > Environment) to generate images.';
+      const fallbackPrompt = `The user asked for an image of "${prompt}". Give a detailed, creative, and beautiful answer explaining and visualizing this concept in detail.`;
+      const aiResponse = await callGeminiAI(fallbackPrompt, null);
+      botReplyText = `${aiResponse}\n\n*(Note: To generate real DALL·E images directly in chat, add your OPENAI_API_KEY in your Render dashboard environment variables).*`;
     } else {
       try {
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -425,7 +427,9 @@ async function handleImageGeneration(req, res, prompt, conversationId) {
         }
       } catch (openaiErr) {
         console.error('OpenAI Image Generation Error:', openaiErr);
-        botReplyText = `⚠️ Image generation failed: ${openaiErr.message || 'OpenAI API error'}`;
+        const fallbackPrompt = `The user asked for an image of "${prompt}". Give a detailed, creative, and beautiful answer explaining and visualizing this concept in detail.`;
+        const aiResponse = await callGeminiAI(fallbackPrompt, null);
+        botReplyText = `${aiResponse}\n\n*(Image Generation Note: ${openaiErr.message || 'OpenAI quota exceeded or key invalid'}).*`;
       }
     }
 
