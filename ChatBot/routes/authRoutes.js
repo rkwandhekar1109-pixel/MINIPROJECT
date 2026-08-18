@@ -152,6 +152,8 @@ router.post('/api/auth/forgot-password', async (req, res) => {
     user.resetOtpExpires = otpExpires;
     await user.save();
 
+    console.log(`🔐 [PASSWORD RESET OTP] Email: ${user.email} | OTP: ${otp}`);
+
     // Check mail transporter
     const transporter = getMailTransporter();
     if (!transporter) {
