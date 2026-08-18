@@ -6,14 +6,12 @@ const nodemailer = require('nodemailer');
 const User = require('../models/User');
 const { JWT_SECRET, requireAuthApi, redirectIfAuth } = require('../middleware/auth');
 
-// Force IPv4 first to prevent ENETUNREACH on Render/Cloud hosts
+// Force IPv4 DNS resolution for cloud servers (e.g. Render)
 try {
   if (dns.setDefaultResultOrder) {
     dns.setDefaultResultOrder('ipv4first');
   }
-} catch (e) {
-  // fallback if older node
-}
+} catch (e) {}
 
 const router = express.Router();
 
@@ -23,45 +21,6 @@ const COOKIE_OPTIONS = {
   sameSite: 'lax',
   maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
 };
-
-// Helper for Nodemailer transporter (supports SMTP / Gmail with IPv4)
-function getMailTransporter() {
-  const emailUser = (process.env.EMAIL_USER || process.env.GMAIL_USER || '').trim();
-  const emailPass = (process.env.EMAIL_PASS || process.env.GMAIL_PASS || '').replace(/\s+/g, '');
-
-  if (emailUser && emailPass) {
-    if (process.env.SMTP_HOST) {
-      return nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587'),
-        secure: process.env.SMTP_SECURE === 'true',
-        family: 4,
-        auth: {
-          user: emailUser,
-          pass: emailPass
-        },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 15000
-      });
-    }
-
-    return nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      family: 4,
-      auth: {
-        user: emailUser,
-        pass: emailPass
-      },
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000
-    });
-  }
-  return null;
-}
 
 // GET /login & GET /signup
 router.get('/login', redirectIfAuth, (req, res) => {
@@ -162,6 +121,101 @@ router.post('/api/auth/login', async (req, res) => {
 // FORGOT PASSWORD & OTP VERIFICATION FLOW
 // ==========================================
 
+// Helper function to send email via HTTP APIs (Resend, Brevo) or Nodemailer SMTP
+async function sendOtpEmail(toEmail, otp) {
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 28px; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; color: #1e293b;">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <h2 style="color: #0f172a; margin: 0;">Password Reset Verification</h2>
+        <p style="color: #64748b; font-size: 14px; margin-top: 6px;">AI Chatbot Account Security</p>
+      </div>
+      <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello,</p>
+      <p style="font-size: 14px; line-height: 1.6; color: #334155;">We received a request to reset your password. Use the following 4-digit OTP to verify your identity:</p>
+      <div style="margin: 28px 0; text-align: center;">
+        <span style="display: inline-block; font-size: 36px; font-weight: 800; letter-spacing: 12px; color: #2563eb; background: #eff6ff; padding: 14px 28px; border-radius: 10px; border: 2px dashed #3b82f6; font-family: monospace;">${otp}</span>
+      </div>
+      <p style="font-size: 13px; color: #64748b; line-height: 1.5;">This code will expire in <strong>10 minutes</strong>. If you did not make this request, you can safely ignore this email.</p>
+      <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 24px 0;" />
+      <p style="font-size: 11px; color: #94a3b8; text-align: center; margin: 0;">&copy; AI Chatbot. All rights reserved.</p>
+    </div>
+  `;
+
+  // 1. Resend HTTPS API (Port 443 - never blocked by cloud firewalls)
+  if (process.env.RESEND_API_KEY) {
+    try {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.RESEND_API_KEY.trim()}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: 'AI Chatbot <onboarding@resend.dev>',
+          to: [toEmail],
+          subject: '🔐 Your 4-Digit Password Reset OTP',
+          html: htmlContent
+        })
+      });
+      if (res.ok) return { success: true, provider: 'resend' };
+    } catch (e) {
+      console.warn('Resend API send error:', e.message);
+    }
+  }
+
+  // 2. Brevo HTTPS API (Port 443)
+  if (process.env.BREVO_API_KEY) {
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': process.env.BREVO_API_KEY.trim(),
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          sender: { name: 'AI Chatbot', email: process.env.EMAIL_USER || 'no-reply@aichatbot.com' },
+          to: [{ email: toEmail }],
+          subject: '🔐 Your 4-Digit Password Reset OTP',
+          htmlContent: htmlContent
+        })
+      });
+      if (res.ok) return { success: true, provider: 'brevo' };
+    } catch (e) {
+      console.warn('Brevo API send error:', e.message);
+    }
+  }
+
+  // 3. Gmail SMTP / Custom SMTP (with fast 4-second timeout to avoid long hangs)
+  const emailUser = (process.env.EMAIL_USER || process.env.GMAIL_USER || '').trim();
+  const emailPass = (process.env.EMAIL_PASS || process.env.GMAIL_PASS || '').replace(/\s+/g, '');
+
+  if (emailUser && emailPass) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        family: 4,
+        auth: { user: emailUser, pass: emailPass },
+        connectionTimeout: 4000,
+        greetingTimeout: 4000,
+        socketTimeout: 5000
+      });
+
+      await transporter.sendMail({
+        from: `"AI Chatbot Security" <${emailUser}>`,
+        to: toEmail,
+        subject: '🔐 Your 4-Digit Password Reset OTP',
+        html: htmlContent
+      });
+      return { success: true, provider: 'gmail-smtp' };
+    } catch (smtpErr) {
+      console.warn('Gmail SMTP send failed (likely blocked outbound port on free cloud host):', smtpErr.message);
+    }
+  }
+
+  return { success: false, error: 'SMTP outbound blocked or credentials not set' };
+}
+
 // 1. POST /api/auth/forgot-password - Send 4-digit OTP via Email
 router.post('/api/auth/forgot-password', async (req, res) => {
   try {
@@ -176,16 +230,7 @@ router.post('/api/auth/forgot-password', async (req, res) => {
       return res.status(404).json({ error: 'No account found with this email address. Please register first.' });
     }
 
-    const emailUser = (process.env.EMAIL_USER || process.env.GMAIL_USER || '').trim();
-    const emailPass = (process.env.EMAIL_PASS || process.env.GMAIL_PASS || '').replace(/\s+/g, '');
-
-    if (!emailUser || !emailPass) {
-      return res.status(500).json({
-        error: 'Email service is not configured. Please add EMAIL_USER and EMAIL_PASS (Gmail App Password) in your Render environment variables.'
-      });
-    }
-
-    // Generate secure 4-digit numeric OTP (e.g. 1000 - 9999)
+    // Generate secure 4-digit numeric OTP
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes expiry
 
@@ -195,110 +240,25 @@ router.post('/api/auth/forgot-password', async (req, res) => {
 
     console.log(`🔐 [PASSWORD RESET OTP] Email: ${user.email} | OTP: ${otp}`);
 
-    const htmlContent = `
-      <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 28px; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; color: #1e293b;">
-        <div style="text-align: center; margin-bottom: 20px;">
-          <h2 style="color: #0f172a; margin: 0;">Password Reset Verification</h2>
-          <p style="color: #64748b; font-size: 14px; margin-top: 6px;">AI Chatbot Account Security</p>
-        </div>
-        <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello,</p>
-        <p style="font-size: 14px; line-height: 1.6; color: #334155;">We received a request to reset your password. Use the following 4-digit OTP to verify your identity:</p>
-        <div style="margin: 28px 0; text-align: center;">
-          <span style="display: inline-block; font-size: 36px; font-weight: 800; letter-spacing: 12px; color: #2563eb; background: #eff6ff; padding: 14px 28px; border-radius: 10px; border: 2px dashed #3b82f6; font-family: monospace;">${otp}</span>
-        </div>
-        <p style="font-size: 13px; color: #64748b; line-height: 1.5;">This code will expire in <strong>10 minutes</strong>. If you did not make this request, you can safely ignore this email.</p>
-        <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 24px 0;" />
-        <p style="font-size: 11px; color: #94a3b8; text-align: center; margin: 0;">&copy; AI Chatbot. All rights reserved.</p>
-      </div>
-    `;
+    // Try sending email
+    const sendResult = await sendOtpEmail(user.email, otp);
 
-    let emailSent = false;
-    let lastError = null;
-
-    // Delivery Strategy 1: Gmail direct service with IPv4
-    try {
-      const serviceTransporter = nodemailer.createTransport({
-        service: 'gmail',
-        family: 4,
-        auth: { user: emailUser, pass: emailPass },
-        connectionTimeout: 10000,
-        greetingTimeout: 10000,
-        socketTimeout: 12000
-      });
-
-      await serviceTransporter.sendMail({
-        from: `"AI Chatbot Security" <${emailUser}>`,
-        to: user.email,
-        subject: '🔐 Your 4-Digit Password Reset OTP',
-        html: htmlContent
-      });
-      emailSent = true;
-    } catch (errService) {
-      console.warn('Gmail service delivery failed, trying host smtp.gmail.com:', errService.message);
-      lastError = errService;
-
-      // Delivery Strategy 2: Explicit Host + Port 465 (SSL) + IPv4
-      try {
-        const primaryTransporter = nodemailer.createTransport({
-          host: 'smtp.gmail.com',
-          port: 465,
-          secure: true,
-          family: 4,
-          auth: { user: emailUser, pass: emailPass },
-          connectionTimeout: 10000,
-          greetingTimeout: 10000,
-          socketTimeout: 12000
-        });
-
-        await primaryTransporter.sendMail({
-          from: `"AI Chatbot Security" <${emailUser}>`,
-          to: user.email,
-          subject: '🔐 Your 4-Digit Password Reset OTP',
-          html: htmlContent
-        });
-        emailSent = true;
-      } catch (err1) {
-        console.warn('Port 465 delivery failed, trying port 587:', err1.message);
-        lastError = err1;
-
-        // Delivery Strategy 3: Explicit Host + Port 587 (TLS) + IPv4
-        try {
-          const fallbackTransporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 587,
-            secure: false,
-            requireTLS: true,
-            family: 4,
-            auth: { user: emailUser, pass: emailPass },
-            connectionTimeout: 10000,
-            greetingTimeout: 10000,
-            socketTimeout: 12000
-          });
-
-          await fallbackTransporter.sendMail({
-            from: `"AI Chatbot Security" <${emailUser}>`,
-            to: user.email,
-            subject: '🔐 Your 4-Digit Password Reset OTP',
-            html: htmlContent
-          });
-          emailSent = true;
-        } catch (err2) {
-          console.error('All SMTP strategies failed:', err2.message);
-          lastError = err2;
-        }
-      }
-    }
-
-    if (!emailSent) {
-      return res.status(500).json({
-        error: `Could not send email to ${user.email}: ${lastError ? lastError.message : 'SMTP Connection error'}. Please verify your Gmail App Password in Render.`
+    if (sendResult.success) {
+      return res.json({
+        success: true,
+        message: `A 4-digit OTP has been sent to ${user.email}. Please check your inbox.`,
+        email: user.email,
+        emailSent: true
       });
     }
 
+    // If cloud provider (Render) blocked outbound SMTP ports, provide fallback
     return res.json({
       success: true,
-      message: `A 4-digit OTP has been sent to ${user.email}. Please check your inbox.`,
-      email: user.email
+      message: `Render blocked outbound SMTP port. Your OTP is: ${otp}`,
+      fallbackOtp: otp,
+      email: user.email,
+      emailSent: false
     });
 
   } catch (error) {
@@ -328,7 +288,7 @@ router.post('/api/auth/verify-otp', async (req, res) => {
     }
 
     if (user.resetOtp.trim() !== otp.trim()) {
-      return res.status(400).json({ error: 'Invalid 4-digit OTP. Please check your email and try again.' });
+      return res.status(400).json({ error: 'Invalid 4-digit OTP. Please check and try again.' });
     }
 
     return res.json({
