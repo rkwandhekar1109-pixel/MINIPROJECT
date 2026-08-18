@@ -63,6 +63,9 @@ async function callGeminiAI(userMsg, uploadedFile) {
     return '⚠️ GEMINI_API_KEY is not configured in your server environment variables. Please add your GEMINI_API_KEY in your hosting dashboard (e.g. Render Settings > Environment).';
   }
 
+  const promptText = userMsg || 'Please analyze this image.';
+  let lastError = null;
+
   const candidateModels = [
     process.env.GEMINI_MODEL,
     'gemini-3.5-flash',
@@ -105,6 +108,7 @@ async function callGeminiAI(userMsg, uploadedFile) {
         return response.text;
       }
     } catch (sdkError) {
+      lastError = sdkError;
       console.warn(`@google/genai failed with model ${modelName}:`, sdkError.message);
     }
   }
@@ -132,11 +136,13 @@ async function callGeminiAI(userMsg, uploadedFile) {
         return response.text();
       }
     } catch (fallbackError) {
+      lastError = fallbackError;
       console.warn(`@google/generative-ai failed with model ${modelName}:`, fallbackError.message);
     }
   }
 
-  return '⚠️ Unable to connect to Gemini AI. Please verify your GEMINI_API_KEY and API quotas in Google AI Studio.';
+  const details = lastError ? ` Details: ${lastError.message}` : '';
+  return `⚠️ Unable to connect to Gemini AI.${details}`;
 }
 
 // ==========================================
