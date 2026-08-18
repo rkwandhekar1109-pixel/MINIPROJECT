@@ -241,24 +241,16 @@ router.post('/api/auth/forgot-password', async (req, res) => {
     console.log(`🔐 [PASSWORD RESET OTP] Email: ${user.email} | OTP: ${otp}`);
 
     // Try sending email
-    const sendResult = await sendOtpEmail(user.email, otp);
-
     if (sendResult.success) {
       return res.json({
         success: true,
-        message: `A 4-digit OTP has been sent to ${user.email}. Please check your inbox.`,
-        email: user.email,
-        emailSent: true
+        message: `A 4-digit verification OTP has been sent directly to ${user.email}. Please check your inbox and enter the code below.`,
+        email: user.email
       });
     }
 
-    // If cloud provider (Render) blocked outbound SMTP ports, provide fallback
-    return res.json({
-      success: true,
-      message: `Render blocked outbound SMTP port. Your OTP is: ${otp}`,
-      fallbackOtp: otp,
-      email: user.email,
-      emailSent: false
+    return res.status(500).json({
+      error: `Could not send email to ${user.email}. Render's free network blocks standard SMTP ports. To enable instant live email sending on Render, please add a free RESEND_API_KEY (from resend.com) to your Render Environment variables.`
     });
 
   } catch (error) {

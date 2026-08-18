@@ -401,13 +401,8 @@
           document.getElementById('auth-tabs').classList.add('hidden');
           document.getElementById('forgot-step2-form').classList.remove('hidden');
 
-          if (data.fallbackOtp) {
-            document.getElementById('otp-input').value = data.fallbackOtp;
-            showAlert(`OTP Code: ${data.fallbackOtp} (Email sent / Render fallback).`, 'success');
-          } else {
-            document.getElementById('otp-input').value = '';
-            showAlert(`4-digit OTP sent to ${email}. Please check your inbox!`, 'success');
-          }
+          document.getElementById('otp-input').value = '';
+          showAlert(`4-digit OTP sent to ${email}. Please check your inbox and enter it below!`, 'success');
           document.getElementById('otp-input').focus();
         }
       } catch (err) {
