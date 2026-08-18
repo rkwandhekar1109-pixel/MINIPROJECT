@@ -1,4 +1,12 @@
 require('dotenv').config();
+const dns = require('dns');
+
+// Force IPv4 DNS resolution for cloud servers (e.g. Render)
+try {
+  if (dns.setDefaultResultOrder) {
+    dns.setDefaultResultOrder('ipv4first');
+  }
+} catch (e) {}
 
 const express = require('express');
 const mongoose = require('mongoose');

@@ -1,9 +1,19 @@
 const express = require('express');
+const dns = require('dns');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const User = require('../models/User');
 const { JWT_SECRET, requireAuthApi, redirectIfAuth } = require('../middleware/auth');
+
+// Force IPv4 first to prevent ENETUNREACH on Render/Cloud hosts
+try {
+  if (dns.setDefaultResultOrder) {
+    dns.setDefaultResultOrder('ipv4first');
+  }
+} catch (e) {
+  // fallback if older node
+}
 
 const router = express.Router();
 
@@ -14,7 +24,7 @@ const COOKIE_OPTIONS = {
   maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
 };
 
-// Helper for Nodemailer transporter (supports SMTP / Gmail)
+// Helper for Nodemailer transporter (supports SMTP / Gmail with IPv4)
 function getMailTransporter() {
   const emailUser = (process.env.EMAIL_USER || process.env.GMAIL_USER || '').trim();
   const emailPass = (process.env.EMAIL_PASS || process.env.GMAIL_PASS || '').replace(/\s+/g, '');
@@ -25,13 +35,14 @@ function getMailTransporter() {
         host: process.env.SMTP_HOST,
         port: parseInt(process.env.SMTP_PORT || '587'),
         secure: process.env.SMTP_SECURE === 'true',
+        family: 4,
         auth: {
           user: emailUser,
           pass: emailPass
         },
-        connectionTimeout: 8000,
-        greetingTimeout: 8000,
-        socketTimeout: 10000
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000
       });
     }
 
@@ -39,13 +50,14 @@ function getMailTransporter() {
       host: 'smtp.gmail.com',
       port: 465,
       secure: true,
+      family: 4,
       auth: {
         user: emailUser,
         pass: emailPass
       },
-      connectionTimeout: 8000,
-      greetingTimeout: 8000,
-      socketTimeout: 10000
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000
     });
   }
   return null;
@@ -200,54 +212,80 @@ router.post('/api/auth/forgot-password', async (req, res) => {
       </div>
     `;
 
-    // Attempt delivery via Port 465 (SSL) or Port 587 (TLS)
     let emailSent = false;
     let lastError = null;
 
+    // Delivery Strategy 1: Gmail direct service with IPv4
     try {
-      const primaryTransporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
+      const serviceTransporter = nodemailer.createTransport({
+        service: 'gmail',
+        family: 4,
         auth: { user: emailUser, pass: emailPass },
-        connectionTimeout: 7000,
-        greetingTimeout: 7000,
-        socketTimeout: 8000
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 12000
       });
 
-      await primaryTransporter.sendMail({
+      await serviceTransporter.sendMail({
         from: `"AI Chatbot Security" <${emailUser}>`,
         to: user.email,
         subject: '🔐 Your 4-Digit Password Reset OTP',
         html: htmlContent
       });
       emailSent = true;
-    } catch (err1) {
-      console.warn('Port 465 delivery failed, trying port 587:', err1.message);
-      lastError = err1;
+    } catch (errService) {
+      console.warn('Gmail service delivery failed, trying host smtp.gmail.com:', errService.message);
+      lastError = errService;
 
+      // Delivery Strategy 2: Explicit Host + Port 465 (SSL) + IPv4
       try {
-        const fallbackTransporter = nodemailer.createTransport({
+        const primaryTransporter = nodemailer.createTransport({
           host: 'smtp.gmail.com',
-          port: 587,
-          secure: false,
-          requireTLS: true,
+          port: 465,
+          secure: true,
+          family: 4,
           auth: { user: emailUser, pass: emailPass },
-          connectionTimeout: 7000,
-          greetingTimeout: 7000,
-          socketTimeout: 8000
+          connectionTimeout: 10000,
+          greetingTimeout: 10000,
+          socketTimeout: 12000
         });
 
-        await fallbackTransporter.sendMail({
+        await primaryTransporter.sendMail({
           from: `"AI Chatbot Security" <${emailUser}>`,
           to: user.email,
           subject: '🔐 Your 4-Digit Password Reset OTP',
           html: htmlContent
         });
         emailSent = true;
-      } catch (err2) {
-        console.error('Port 587 delivery failed:', err2.message);
-        lastError = err2;
+      } catch (err1) {
+        console.warn('Port 465 delivery failed, trying port 587:', err1.message);
+        lastError = err1;
+
+        // Delivery Strategy 3: Explicit Host + Port 587 (TLS) + IPv4
+        try {
+          const fallbackTransporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            requireTLS: true,
+            family: 4,
+            auth: { user: emailUser, pass: emailPass },
+            connectionTimeout: 10000,
+            greetingTimeout: 10000,
+            socketTimeout: 12000
+          });
+
+          await fallbackTransporter.sendMail({
+            from: `"AI Chatbot Security" <${emailUser}>`,
+            to: user.email,
+            subject: '🔐 Your 4-Digit Password Reset OTP',
+            html: htmlContent
+          });
+          emailSent = true;
+        } catch (err2) {
+          console.error('All SMTP strategies failed:', err2.message);
+          lastError = err2;
+        }
       }
     }
 
@@ -290,7 +328,7 @@ router.post('/api/auth/verify-otp', async (req, res) => {
     }
 
     if (user.resetOtp.trim() !== otp.trim()) {
-      return res.status(400).json({ error: 'Invalid 4-digit OTP. Please check and try again.' });
+      return res.status(400).json({ error: 'Invalid 4-digit OTP. Please check your email and try again.' });
     }
 
     return res.json({
