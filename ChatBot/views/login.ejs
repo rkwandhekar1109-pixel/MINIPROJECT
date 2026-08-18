@@ -376,13 +376,19 @@
       }
 
       setBtnLoading(submitBtn, true);
+      document.getElementById('auth-alert').classList.add('hidden');
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 18000);
 
       try {
         const res = await fetch('/api/auth/forgot-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email })
+          body: JSON.stringify({ email }),
+          signal: controller.signal
         });
+        clearTimeout(timeoutId);
         const data = await res.json();
 
         if (!res.ok || !data.success) {
@@ -399,7 +405,11 @@
           showAlert(`4-digit OTP sent to ${email}. Please check your inbox!`, 'success');
         }
       } catch (err) {
-        showAlert('Network error. Could not connect to server.');
+        if (err.name === 'AbortError') {
+          showAlert('Request timed out. Please check your Gmail App Password in Render.');
+        } else {
+          showAlert('Network error. Could not connect to server.');
+        }
       } finally {
         setBtnLoading(submitBtn, false);
       }

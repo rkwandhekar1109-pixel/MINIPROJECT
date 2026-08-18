@@ -16,16 +16,36 @@ const COOKIE_OPTIONS = {
 
 // Helper for Nodemailer transporter (supports SMTP / Gmail)
 function getMailTransporter() {
-  const emailUser = process.env.EMAIL_USER || process.env.GMAIL_USER;
-  const emailPass = process.env.EMAIL_PASS || process.env.GMAIL_PASS;
+  const emailUser = (process.env.EMAIL_USER || process.env.GMAIL_USER || '').trim();
+  const emailPass = (process.env.EMAIL_PASS || process.env.GMAIL_PASS || '').replace(/\s+/g, '');
 
   if (emailUser && emailPass) {
+    if (process.env.SMTP_HOST) {
+      return nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: parseInt(process.env.SMTP_PORT || '587'),
+        secure: process.env.SMTP_SECURE === 'true',
+        auth: {
+          user: emailUser,
+          pass: emailPass
+        },
+        connectionTimeout: 8000,
+        greetingTimeout: 8000,
+        socketTimeout: 10000
+      });
+    }
+
     return nodemailer.createTransport({
-      service: process.env.EMAIL_SERVICE || 'gmail',
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
       auth: {
         user: emailUser,
         pass: emailPass
-      }
+      },
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000
     });
   }
   return null;
@@ -141,7 +161,16 @@ router.post('/api/auth/forgot-password', async (req, res) => {
     const normalizedEmail = email.trim().toLowerCase();
     const user = await User.findOne({ email: normalizedEmail });
     if (!user) {
-      return res.status(404).json({ error: 'No account found with this email address.' });
+      return res.status(404).json({ error: 'No account found with this email address. Please register first.' });
+    }
+
+    const emailUser = (process.env.EMAIL_USER || process.env.GMAIL_USER || '').trim();
+    const emailPass = (process.env.EMAIL_PASS || process.env.GMAIL_PASS || '').replace(/\s+/g, '');
+
+    if (!emailUser || !emailPass) {
+      return res.status(500).json({
+        error: 'Email service is not configured. Please add EMAIL_USER and EMAIL_PASS (Gmail App Password) in your Render environment variables.'
+      });
     }
 
     // Generate secure 4-digit numeric OTP (e.g. 1000 - 9999)
@@ -154,41 +183,77 @@ router.post('/api/auth/forgot-password', async (req, res) => {
 
     console.log(`🔐 [PASSWORD RESET OTP] Email: ${user.email} | OTP: ${otp}`);
 
-    // Check mail transporter
-    const transporter = getMailTransporter();
-    if (!transporter) {
-      return res.status(500).json({
-        error: 'Email service is not configured. Please add EMAIL_USER and EMAIL_PASS (Gmail App Password) in your Render environment variables to send OTP emails.'
-      });
-    }
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 28px; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; color: #1e293b;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h2 style="color: #0f172a; margin: 0;">Password Reset Verification</h2>
+          <p style="color: #64748b; font-size: 14px; margin-top: 6px;">AI Chatbot Account Security</p>
+        </div>
+        <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello,</p>
+        <p style="font-size: 14px; line-height: 1.6; color: #334155;">We received a request to reset your password. Use the following 4-digit OTP to verify your identity:</p>
+        <div style="margin: 28px 0; text-align: center;">
+          <span style="display: inline-block; font-size: 36px; font-weight: 800; letter-spacing: 12px; color: #2563eb; background: #eff6ff; padding: 14px 28px; border-radius: 10px; border: 2px dashed #3b82f6; font-family: monospace;">${otp}</span>
+        </div>
+        <p style="font-size: 13px; color: #64748b; line-height: 1.5;">This code will expire in <strong>10 minutes</strong>. If you did not make this request, you can safely ignore this email.</p>
+        <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 24px 0;" />
+        <p style="font-size: 11px; color: #94a3b8; text-align: center; margin: 0;">&copy; AI Chatbot. All rights reserved.</p>
+      </div>
+    `;
 
-    // Send OTP email
+    // Attempt delivery via Port 465 (SSL) or Port 587 (TLS)
+    let emailSent = false;
+    let lastError = null;
+
     try {
-      await transporter.sendMail({
-        from: `"AI Chatbot Security" <${process.env.EMAIL_USER || process.env.GMAIL_USER}>`,
+      const primaryTransporter = nodemailer.createTransport({
+        host: 'smtp.gmail.com',
+        port: 465,
+        secure: true,
+        auth: { user: emailUser, pass: emailPass },
+        connectionTimeout: 7000,
+        greetingTimeout: 7000,
+        socketTimeout: 8000
+      });
+
+      await primaryTransporter.sendMail({
+        from: `"AI Chatbot Security" <${emailUser}>`,
         to: user.email,
         subject: '🔐 Your 4-Digit Password Reset OTP',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 28px; background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; color: #1e293b;">
-            <div style="text-align: center; margin-bottom: 20px;">
-              <h2 style="color: #0f172a; margin: 0;">Password Reset Verification</h2>
-              <p style="color: #64748b; font-size: 14px; margin-top: 6px;">AI Chatbot Account Security</p>
-            </div>
-            <p style="font-size: 14px; line-height: 1.6; color: #334155;">Hello,</p>
-            <p style="font-size: 14px; line-height: 1.6; color: #334155;">We received a request to reset your password. Use the following 4-digit OTP to verify your identity:</p>
-            <div style="margin: 28px 0; text-align: center;">
-              <span style="display: inline-block; font-size: 36px; font-weight: 800; letter-spacing: 12px; color: #2563eb; background: #eff6ff; padding: 14px 28px; border-radius: 10px; border: 2px dashed #3b82f6; font-family: monospace;">${otp}</span>
-            </div>
-            <p style="font-size: 13px; color: #64748b; line-height: 1.5;">This code will expire in <strong>10 minutes</strong>. If you did not make this request, you can safely ignore this email.</p>
-            <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 24px 0;" />
-            <p style="font-size: 11px; color: #94a3b8; text-align: center; margin: 0;">&copy; AI Chatbot. All rights reserved.</p>
-          </div>
-        `
+        html: htmlContent
       });
-    } catch (mailErr) {
-      console.error('Nodemailer send error:', mailErr);
+      emailSent = true;
+    } catch (err1) {
+      console.warn('Port 465 delivery failed, trying port 587:', err1.message);
+      lastError = err1;
+
+      try {
+        const fallbackTransporter = nodemailer.createTransport({
+          host: 'smtp.gmail.com',
+          port: 587,
+          secure: false,
+          requireTLS: true,
+          auth: { user: emailUser, pass: emailPass },
+          connectionTimeout: 7000,
+          greetingTimeout: 7000,
+          socketTimeout: 8000
+        });
+
+        await fallbackTransporter.sendMail({
+          from: `"AI Chatbot Security" <${emailUser}>`,
+          to: user.email,
+          subject: '🔐 Your 4-Digit Password Reset OTP',
+          html: htmlContent
+        });
+        emailSent = true;
+      } catch (err2) {
+        console.error('Port 587 delivery failed:', err2.message);
+        lastError = err2;
+      }
+    }
+
+    if (!emailSent) {
       return res.status(500).json({
-        error: `Failed to send email to ${user.email}: ${mailErr.message || 'SMTP authentication failed'}. Please verify your Gmail App Password.`
+        error: `Could not send email to ${user.email}: ${lastError ? lastError.message : 'SMTP Connection error'}. Please verify your Gmail App Password in Render.`
       });
     }
 
@@ -200,7 +265,7 @@ router.post('/api/auth/forgot-password', async (req, res) => {
 
   } catch (error) {
     console.error('Forgot password error:', error);
-    return res.status(500).json({ error: 'Server error generating password reset OTP.' });
+    return res.status(500).json({ error: error.message || 'Server error generating password reset OTP.' });
   }
 });
 
