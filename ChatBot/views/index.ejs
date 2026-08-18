@@ -1,41 +1,238 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" data-theme="dark">
 <head>
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Chatbot</title>
-  <link rel="stylesheet" href="style.css">
+  <title>AI Chatbot — Assistant & Image Generator</title>
+  
+  <!-- Fonts: Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+  <div class="app-layout">
+    <!-- Mobile Sidebar Backdrop Overlay -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop" onclick="toggleMobileSidebar()"></div>
 
-<div class="chat-container">
+    <!-- SIDEBAR -->
+    <aside id="sidebar" class="sidebar">
+      <!-- Sidebar Header -->
+      <div class="sidebar-header">
+        <div class="brand">
+          <div class="brand-logo">
+            <i data-lucide="sparkles"></i>
+          </div>
+          <span class="brand-name">AI Chatbot</span>
+        </div>
+        <button class="icon-btn-ghost mobile-close-btn" onclick="toggleMobileSidebar()" aria-label="Close sidebar">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
 
-  <h2>🤖 AI Chatbot</h2>
+      <!-- New Chat Action -->
+      <div class="sidebar-action">
+        <button id="new-chat-btn" class="btn btn-new-chat" onclick="startNewChat()">
+          <i data-lucide="plus"></i>
+          <span>New Chat</span>
+        </button>
+      </div>
 
-  <!-- Chat messages -->
-  <div id="chat-box">
-    <div class="message bot">Hello! How can I help you today?</div>
+      <!-- Conversations List -->
+      <div class="conversations-wrapper">
+        <div class="conversations-label">Recent Conversations</div>
+        <div id="conversations-list" class="conversations-list">
+          <!-- Dynamically populated via JS -->
+          <div class="conv-skeleton"></div>
+          <div class="conv-skeleton"></div>
+          <div class="conv-skeleton"></div>
+        </div>
+      </div>
+
+      <!-- Sidebar Footer (User Info & Controls) -->
+      <div class="sidebar-footer">
+        <div class="user-profile">
+          <div class="user-avatar" id="user-avatar-initial">
+            <%= (user && user.email) ? user.email.charAt(0).toUpperCase() : 'U' %>
+          </div>
+          <div class="user-info">
+            <span class="user-email" id="user-email-display" title="<%= user ? user.email : '' %>">
+              <%= user ? user.email : 'User' %>
+            </span>
+          </div>
+        </div>
+
+        <div class="sidebar-footer-controls">
+          <button class="footer-icon-btn" onclick="toggleTheme()" id="theme-btn" title="Toggle Light/Dark Theme">
+            <i data-lucide="sun" id="theme-icon-sidebar"></i>
+          </button>
+          <button class="footer-icon-btn logout-btn" onclick="handleLogout()" title="Log Out">
+            <i data-lucide="log-out"></i>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN CHAT PANEL -->
+    <main class="main-panel">
+      <!-- Top Navbar -->
+      <header class="main-header">
+        <div class="header-left">
+          <button class="icon-btn-ghost menu-toggle-btn" onclick="toggleMobileSidebar()" aria-label="Open sidebar">
+            <i data-lucide="menu"></i>
+          </button>
+          <div class="current-chat-meta">
+            <h2 id="current-chat-title" class="current-title">New Chat</h2>
+            <div class="model-badge">
+              <span class="status-dot"></span>
+              <span>Gemini 2.5 & DALL·E</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="header-right">
+          <button class="btn btn-secondary btn-sm" onclick="startNewChat()">
+            <i data-lucide="plus"></i>
+            <span class="btn-text-desktop">New Chat</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Message History Box -->
+      <section id="chat-box" class="chat-box">
+        <!-- Empty State Hero (shown if chat has no messages) -->
+        <div id="empty-state" class="empty-state">
+          <div class="hero-icon">
+            <i data-lucide="bot"></i>
+          </div>
+          <h1 class="hero-title">How can I help you today?</h1>
+          <p class="hero-subtitle">Ask questions, upload images for analysis, or generate custom AI art.</p>
+
+          <div class="prompt-suggestions">
+            <button class="suggestion-card" onclick="applySuggestion('Explain the theory of relativity simply')">
+              <i data-lucide="lightbulb" class="sug-icon"></i>
+              <div class="sug-content">
+                <strong>Explain a concept</strong>
+                <span>Theory of relativity in plain terms</span>
+              </div>
+            </button>
+
+            <button class="suggestion-card" onclick="applySuggestion('/image a serene mountain lake at sunrise with photorealistic lighting')">
+              <i data-lucide="image" class="sug-icon"></i>
+              <div class="sug-content">
+                <strong>Generate an image</strong>
+                <span>Serene mountain lake at sunrise</span>
+              </div>
+            </button>
+
+            <button class="suggestion-card" onclick="triggerImageUpload()">
+              <i data-lucide="camera" class="sug-icon"></i>
+              <div class="sug-content">
+                <strong>Analyze an image</strong>
+                <span>Upload a picture for instant AI vision</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Messages stream container -->
+        <div id="messages-container" class="messages-container"></div>
+      </section>
+
+      <!-- Input Footer Area -->
+      <footer class="input-container-wrapper">
+        <!-- Image Preview Bar (before sending) -->
+        <div id="image-preview-bar" class="image-preview-bar hidden">
+          <div class="preview-thumb-wrapper">
+            <img id="image-preview-img" src="" alt="Upload preview">
+            <button type="button" class="preview-remove-btn" onclick="clearSelectedImage()" title="Remove image">
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          <div class="preview-meta">
+            <span id="preview-filename" class="preview-filename">image.png</span>
+            <span id="preview-filesize" class="preview-filesize">2.4 MB</span>
+          </div>
+        </div>
+
+        <!-- Mode Indicator / Slash Command Hint -->
+        <div id="image-mode-banner" class="image-mode-banner hidden">
+          <i data-lucide="wand-2"></i>
+          <span>Image Generation Mode active — AI will create an image with DALL·E</span>
+          <button type="button" class="close-mode-btn" onclick="toggleImageGenMode(false)">✕</button>
+        </div>
+
+        <!-- Main Input Form -->
+        <form id="chat-form" class="chat-form" onsubmit="handleFormSubmit(event)">
+          <!-- Hidden File Input -->
+          <input type="file" id="image-file-input" accept="image/jpeg,image/png,image/webp,image/gif" hidden onchange="handleImageSelection(event)">
+
+          <div class="input-actions-left">
+            <!-- Upload Image Button -->
+            <button type="button" class="input-tool-btn" id="upload-tool-btn" onclick="triggerImageUpload()" title="Attach image (Max 5MB)">
+              <i data-lucide="paperclip"></i>
+            </button>
+
+            <!-- Image Generation Toggle -->
+            <button type="button" class="input-tool-btn" id="image-gen-tool-btn" onclick="toggleImageGenMode()" title="Create image with /image">
+              <i data-lucide="sparkles"></i>
+            </button>
+          </div>
+
+          <!-- Dynamic Textarea -->
+          <div class="textarea-wrapper">
+            <textarea
+              id="user-input"
+              rows="1"
+              placeholder="Ask anything, or type /image <prompt>..."
+              autocomplete="off"
+            ></textarea>
+          </div>
+
+          <!-- Send / Stop Button -->
+          <div class="input-actions-right">
+            <button type="submit" id="send-btn" class="send-btn" title="Send message" disabled>
+              <i data-lucide="arrow-up"></i>
+            </button>
+          </div>
+        </form>
+
+        <div class="input-disclaimer">
+          AI may generate inaccurate information. Check important facts.
+        </div>
+      </footer>
+    </main>
   </div>
 
-  <!-- Input Area -->
- <div class="input-area">
+  <!-- Delete Conversation Confirmation Modal -->
+  <div id="delete-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-icon-danger">
+          <i data-lucide="trash-2"></i>
+        </div>
+        <h3 class="modal-title">Delete Chat?</h3>
+      </div>
+      <p class="modal-body">
+        This will permanently delete this conversation and all of its messages and images. This action cannot be undone.
+      </p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+        <button type="button" id="confirm-delete-btn" class="btn btn-danger" onclick="executeDeleteConversation()">Delete</button>
+      </div>
+    </div>
+  </div>
 
-  <!-- Hidden Image Input -->
-  <input type="file" id="image-input" accept="image/*" hidden>
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
 
-  <!-- Upload Button -->
-  <!-- <button class="icon-btn" id="upload-btn">📷</button> -->
-
-  <!-- Text Input -->
-  <input type="text" id="user-input" placeholder="Message..." />
-
-  <!-- Send Button -->
-  <button class="icon-btn" id="send-btn">⬆</button>
-
-</div>
-
-</div>
-
-<script src="script.js"></script>
-
+  <!-- Scripts -->
+  <script src="/script.js"></script>
 </body>
 </html>

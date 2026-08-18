@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Chatbot — Authentication</title>
+  <!-- Google Fonts: Plus Jakarta Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="auth-body">
+  <div class="auth-container">
+    <!-- Brand Logo -->
+    <div class="auth-brand">
+      <div class="brand-icon-wrapper">
+        <i data-lucide="sparkles" class="brand-icon"></i>
+      </div>
+      <h1 class="auth-title">AI Chatbot</h1>
+      <p class="auth-subtitle">Intelligent conversations, vision analysis, & image generation</p>
+    </div>
+
+    <!-- Auth Card -->
+    <div class="auth-card">
+      <!-- Tabs -->
+      <div class="auth-tabs">
+        <button type="button" class="tab-btn <%= (typeof mode !== 'undefined' && mode === 'signup') ? '' : 'active' %>" id="tab-login" onclick="switchAuthMode('login')">
+          <i data-lucide="log-in"></i> Log In
+        </button>
+        <button type="button" class="tab-btn <%= (typeof mode !== 'undefined' && mode === 'signup') ? 'active' : '' %>" id="tab-signup" onclick="switchAuthMode('signup')">
+          <i data-lucide="user-plus"></i> Sign Up
+        </button>
+      </div>
+
+      <!-- Inline Alert Box -->
+      <div id="auth-alert" class="alert-box hidden" role="alert">
+        <i data-lucide="alert-circle" class="alert-icon"></i>
+        <span id="auth-alert-text"></span>
+      </div>
+
+      <!-- Login Form -->
+      <form id="login-form" class="auth-form <%= (typeof mode !== 'undefined' && mode === 'signup') ? 'hidden' : '' %>" onsubmit="handleAuthSubmit(event, 'login')">
+        <div class="form-group">
+          <label for="login-email">Email Address</label>
+          <div class="input-wrapper">
+            <i data-lucide="mail" class="input-icon"></i>
+            <input type="email" id="login-email" name="email" placeholder="you@example.com" required autocomplete="email">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <div class="input-wrapper">
+            <i data-lucide="lock" class="input-icon"></i>
+            <input type="password" id="login-password" name="password" placeholder="••••••••" required autocomplete="current-password">
+            <button type="button" class="toggle-pw-btn" onclick="togglePasswordVisibility('login-password', this)" aria-label="Toggle password visibility">
+              <i data-lucide="eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" id="login-submit-btn" class="btn btn-primary btn-block">
+          <span class="btn-text">Log In</span>
+          <span class="spinner hidden"></span>
+        </button>
+      </form>
+
+      <!-- Signup Form -->
+      <form id="signup-form" class="auth-form <%= (typeof mode !== 'undefined' && mode === 'signup') ? '' : 'hidden' %>" onsubmit="handleAuthSubmit(event, 'signup')">
+        <div class="form-group">
+          <label for="signup-email">Email Address</label>
+          <div class="input-wrapper">
+            <i data-lucide="mail" class="input-icon"></i>
+            <input type="email" id="signup-email" name="email" placeholder="you@example.com" required autocomplete="email">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="signup-password">Password</label>
+          <div class="input-wrapper">
+            <i data-lucide="lock" class="input-icon"></i>
+            <input type="password" id="signup-password" name="password" placeholder="At least 6 characters" required minlength="6" autocomplete="new-password">
+            <button type="button" class="toggle-pw-btn" onclick="togglePasswordVisibility('signup-password', this)" aria-label="Toggle password visibility">
+              <i data-lucide="eye"></i>
+            </button>
+          </div>
+          <span class="form-hint">Must be at least 6 characters</span>
+        </div>
+
+        <button type="submit" id="signup-submit-btn" class="btn btn-primary btn-block">
+          <span class="btn-text">Create Account</span>
+          <span class="spinner hidden"></span>
+        </button>
+      </form>
+    </div>
+
+    <!-- Theme switch footer -->
+    <div class="auth-footer">
+      <button class="theme-toggle-btn" onclick="toggleTheme()" id="theme-toggle-btn" title="Toggle Theme">
+        <i data-lucide="sun" id="theme-icon"></i>
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // Initialize Lucide Icons
+    lucide.createIcons();
+
+    // Theme Management
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    updateThemeIcon(savedTheme);
+
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme') || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+      updateThemeIcon(next);
+    }
+
+    function updateThemeIcon(theme) {
+      const icon = document.getElementById('theme-icon');
+      if (icon) {
+        icon.setAttribute('data-lucide', theme === 'dark' ? 'sun' : 'moon');
+        lucide.createIcons();
+      }
+    }
+
+    function togglePasswordVisibility(inputId, btn) {
+      const input = document.getElementById(inputId);
+      if (input.type === 'password') {
+        input.type = 'text';
+        btn.innerHTML = '<i data-lucide="eye-off"></i>';
+      } else {
+        input.type = 'password';
+        btn.innerHTML = '<i data-lucide="eye"></i>';
+      }
+      lucide.createIcons();
+    }
+
+    function switchAuthMode(mode) {
+      const loginForm = document.getElementById('login-form');
+      const signupForm = document.getElementById('signup-form');
+      const tabLogin = document.getElementById('tab-login');
+      const tabSignup = document.getElementById('tab-signup');
+      const alertBox = document.getElementById('auth-alert');
+
+      alertBox.classList.add('hidden');
+
+      if (mode === 'signup') {
+        loginForm.classList.add('hidden');
+        signupForm.classList.remove('hidden');
+        tabLogin.classList.remove('active');
+        tabSignup.classList.add('active');
+        window.history.replaceState({}, '', '/signup');
+      } else {
+        signupForm.classList.add('hidden');
+        loginForm.classList.remove('hidden');
+        tabSignup.classList.remove('active');
+        tabLogin.classList.add('active');
+        window.history.replaceState({}, '', '/login');
+      }
+      lucide.createIcons();
+    }
+
+    async function handleAuthSubmit(e, mode) {
+      e.preventDefault();
+      const alertBox = document.getElementById('auth-alert');
+      const alertText = document.getElementById('auth-alert-text');
+      const submitBtn = document.getElementById(`${mode}-submit-btn`);
+      const btnText = submitBtn.querySelector('.btn-text');
+      const spinner = submitBtn.querySelector('.spinner');
+
+      const email = document.getElementById(`${mode}-email`).value.trim();
+      const password = document.getElementById(`${mode}-password`).value;
+
+      alertBox.classList.add('hidden');
+      alertBox.classList.remove('alert-success');
+      alertBox.classList.add('alert-error');
+
+      // Basic client validation
+      if (!email || !password) {
+        showAlert('Please fill in all fields.');
+        return;
+      }
+
+      if (mode === 'signup' && password.length < 6) {
+        showAlert('Password must be at least 6 characters long.');
+        return;
+      }
+
+      // Show loading state
+      submitBtn.disabled = true;
+      btnText.classList.add('hidden');
+      spinner.classList.remove('hidden');
+
+      try {
+        const endpoint = mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          showAlert(data.error || 'Authentication failed. Please try again.');
+        } else {
+          // Success -> Redirect to chat
+          alertBox.classList.remove('alert-error');
+          alertBox.classList.add('alert-success');
+          showAlert(mode === 'signup' ? 'Account created! Redirecting...' : 'Success! Redirecting...', 'success');
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 600);
+        }
+      } catch (err) {
+        showAlert('Network error. Could not connect to the server.');
+      } finally {
+        submitBtn.disabled = false;
+        btnText.classList.remove('hidden');
+        spinner.classList.add('hidden');
+      }
+    }
+
+    function showAlert(message, type = 'error') {
+      const alertBox = document.getElementById('auth-alert');
+      const alertText = document.getElementById('auth-alert-text');
+      alertText.textContent = message;
+      alertBox.classList.remove('hidden');
+      lucide.createIcons();
+    }
+  </script>
+</body>
+</html>
