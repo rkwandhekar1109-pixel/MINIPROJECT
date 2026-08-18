@@ -63,8 +63,15 @@ async function callGeminiAI(userMsg, uploadedFile) {
     return '⚠️ GEMINI_API_KEY is not configured in your server environment variables. Please add your GEMINI_API_KEY in your hosting dashboard (e.g. Render Settings > Environment).';
   }
 
-  const promptText = userMsg || 'Please analyze this image.';
-  const candidateModels = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+  const candidateModels = [
+    process.env.GEMINI_MODEL,
+    'gemini-3.6-flash',
+    'gemini-3.5-flash',
+    'gemini-3.0-flash',
+    'gemini-2.5-flash',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-pro-latest'
+  ].filter(Boolean);
 
   // Try using @google/genai SDK first
   for (const modelName of candidateModels) {
