@@ -197,67 +197,11 @@ async function sendPasswordResetEmail(toEmail, otp) {
 
   console.log(`📨 [EMAIL DISPATCH INITIATED] Target: ${targetRecipient} | Sender: ${emailUser || 'None'}`);
 
-  // Internal dispatch executor with per-attempt fast timeouts (3.5s max each)
+  // Internal dispatch executor with per-attempt fast timeouts
   const executeDispatch = async () => {
-    // 1. Gmail SMTP (Sends to ANY email address worldwide)
-    if (emailUser && emailPass) {
-      // 1A. Try Gmail Direct SSL (Port 465) with 3.5s timeout
-      try {
-        const sslTransporter = nodemailer.createTransport({
-          host: 'smtp.gmail.com',
-          port: 465,
-          secure: true,
-          family: 4,
-          auth: { user: emailUser, pass: emailPass },
-          connectionTimeout: 3500,
-          greetingTimeout: 3500,
-          socketTimeout: 4000
-        });
+    let lastErrorMsg = '';
 
-        await sslTransporter.sendMail({
-          from: `"AI Chatbot Security" <${emailUser}>`,
-          to: targetRecipient,
-          subject: subject,
-          text: textContent,
-          html: htmlContent
-        });
-
-        console.log(`✅ [EMAIL DELIVERED via Gmail Port 465] Recipient: ${targetRecipient}`);
-        return { success: true, provider: 'gmail-ssl' };
-      } catch (sslErr) {
-        console.warn(`⚠️ [Gmail SSL 465 Notice] ${sslErr.message}`);
-
-        // 1B. Try Gmail TLS (Port 587) with 3.5s timeout
-        try {
-          const tlsTransporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 587,
-            secure: false,
-            requireTLS: true,
-            family: 4,
-            auth: { user: emailUser, pass: emailPass },
-            connectionTimeout: 3500,
-            greetingTimeout: 3500,
-            socketTimeout: 4000
-          });
-
-          await tlsTransporter.sendMail({
-            from: `"AI Chatbot Security" <${emailUser}>`,
-            to: targetRecipient,
-            subject: subject,
-            text: textContent,
-            html: htmlContent
-          });
-
-          console.log(`✅ [EMAIL DELIVERED via Gmail Port 587] Recipient: ${targetRecipient}`);
-          return { success: true, provider: 'gmail-tls' };
-        } catch (tlsErr) {
-          console.warn(`⚠️ [Gmail TLS 587 Notice] ${tlsErr.message}`);
-        }
-      }
-    }
-
-    // 2. Brevo HTTPS API (Port 443 — works with all recipients)
+    // Provider 1: Brevo HTTPS API (Port 443 — delivers to ANY email worldwide without domain restrictions)
     if (process.env.BREVO_API_KEY && process.env.BREVO_API_KEY.trim()) {
       try {
         const res = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -279,13 +223,18 @@ async function sendPasswordResetEmail(toEmail, otp) {
         if (res.ok) {
           console.log(`✅ [EMAIL DELIVERED via Brevo API] Recipient: ${targetRecipient}`);
           return { success: true, provider: 'brevo' };
+        } else {
+          const errData = await res.json();
+          console.warn(`⚠️ [Brevo API Response Notice] ${JSON.stringify(errData)}`);
+          lastErrorMsg = errData.message || 'Brevo API error';
         }
       } catch (brevoErr) {
         console.warn(`⚠️ [Brevo API Notice] ${brevoErr.message}`);
+        lastErrorMsg = brevoErr.message;
       }
     }
 
-    // 3. Resend HTTPS API (Port 443)
+    // Provider 2: Resend HTTPS API (Port 443)
     if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim()) {
       try {
         const fromAddress = (process.env.RESEND_FROM || '').trim() || 'AI Chatbot <onboarding@resend.dev>';
@@ -308,15 +257,81 @@ async function sendPasswordResetEmail(toEmail, otp) {
         if (res.ok) {
           console.log(`✅ [EMAIL DELIVERED via Resend API] Recipient: ${targetRecipient}`);
           return { success: true, provider: 'resend' };
+        } else {
+          const errData = await res.json();
+          console.warn(`⚠️ [Resend API Notice] Code ${res.status}:`, errData);
+          if (res.status === 403 && errData.message && errData.message.includes('testing emails')) {
+            lastErrorMsg = `Resend Free Sandbox only allows sending to the account owner (${errData.message}). To send OTP to any email for free on Render, add a free BREVO_API_KEY from brevo.com.`;
+          } else {
+            lastErrorMsg = errData.message || 'Resend API error';
+          }
         }
       } catch (resendErr) {
         console.warn(`⚠️ [Resend API Notice] ${resendErr.message}`);
+        lastErrorMsg = resendErr.message;
+      }
+    }
+
+    // Provider 3: Gmail SMTP (Direct SSL 465 / TLS 587)
+    if (emailUser && emailPass) {
+      try {
+        const sslTransporter = nodemailer.createTransport({
+          host: 'smtp.gmail.com',
+          port: 465,
+          secure: true,
+          family: 4,
+          auth: { user: emailUser, pass: emailPass },
+          connectionTimeout: 3000,
+          greetingTimeout: 3000,
+          socketTimeout: 3500
+        });
+
+        await sslTransporter.sendMail({
+          from: `"AI Chatbot Security" <${emailUser}>`,
+          to: targetRecipient,
+          subject: subject,
+          text: textContent,
+          html: htmlContent
+        });
+
+        console.log(`✅ [EMAIL DELIVERED via Gmail Port 465] Recipient: ${targetRecipient}`);
+        return { success: true, provider: 'gmail-ssl' };
+      } catch (sslErr) {
+        console.warn(`⚠️ [Gmail SSL 465 Notice] ${sslErr.message}`);
+
+        try {
+          const tlsTransporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            requireTLS: true,
+            family: 4,
+            auth: { user: emailUser, pass: emailPass },
+            connectionTimeout: 3000,
+            greetingTimeout: 3000,
+            socketTimeout: 3500
+          });
+
+          await tlsTransporter.sendMail({
+            from: `"AI Chatbot Security" <${emailUser}>`,
+            to: targetRecipient,
+            subject: subject,
+            text: textContent,
+            html: htmlContent
+          });
+
+          console.log(`✅ [EMAIL DELIVERED via Gmail Port 587] Recipient: ${targetRecipient}`);
+          return { success: true, provider: 'gmail-tls' };
+        } catch (tlsErr) {
+          console.warn(`⚠️ [Gmail TLS 587 Notice] ${tlsErr.message}`);
+          lastErrorMsg = 'Render firewall blocked outbound SMTP connection to Gmail.';
+        }
       }
     }
 
     return {
       success: false,
-      error: 'Email delivery failed. Please verify EMAIL_USER and EMAIL_PASS (Gmail App Password) in your Render environment variables.'
+      error: lastErrorMsg || 'Email delivery failed. Please add BREVO_API_KEY or verify EMAIL_USER/EMAIL_PASS in your Render environment variables.'
     };
   };
 
