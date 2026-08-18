@@ -238,10 +238,10 @@ router.post('/api/auth/forgot-password', async (req, res) => {
     user.resetOtpExpires = otpExpires;
     await user.save();
 
-    console.log(`🔐 [PASSWORD RESET OTP] Email: ${user.email} | OTP: ${otp}`);
-
     // Try sending email
-    if (sendResult.success) {
+    const sendResult = await sendOtpEmail(user.email, otp);
+
+    if (sendResult && sendResult.success) {
       return res.json({
         success: true,
         message: `A 4-digit verification OTP has been sent directly to ${user.email}. Please check your inbox and enter the code below.`,
@@ -250,7 +250,7 @@ router.post('/api/auth/forgot-password', async (req, res) => {
     }
 
     return res.status(500).json({
-      error: `Could not send email to ${user.email}. Render's free network blocks standard SMTP ports. To enable instant live email sending on Render, please add a free RESEND_API_KEY (from resend.com) to your Render Environment variables.`
+      error: `Could not send email to ${user.email}. Render blocks raw SMTP ports. To enable instant live email sending on Render, please add a free RESEND_API_KEY (from resend.com) to your Render Environment variables.`
     });
 
   } catch (error) {
