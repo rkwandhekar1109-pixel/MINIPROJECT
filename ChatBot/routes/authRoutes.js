@@ -170,9 +170,10 @@ router.post('/api/auth/login', async (req, res) => {
 });
 
 // ==========================================
-// 4. EMAIL DISPATCH HELPER
+// 4. UNIVERSAL MULTI-USER EMAIL DISPATCHER
 // ==========================================
 async function sendPasswordResetEmail(toEmail, otp) {
+  const targetRecipient = (toEmail || '').trim().toLowerCase();
   const subject = 'Your Password Reset OTP';
   const textContent = `Hello,\n\nWe received a request to reset your password. Your OTP is: ${otp}\n\nThis OTP is valid for 10 minutes. If you did not request a password reset, please ignore this email. Do not share this OTP with anyone.`;
 
@@ -191,32 +192,95 @@ async function sendPasswordResetEmail(toEmail, otp) {
     </div>
   `;
 
-  // 1. Try Resend HTTPS API (Port 443 — standard on Render)
-  if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim()) {
+  const emailUser = (process.env.EMAIL_USER || process.env.GMAIL_USER || '').trim();
+  const emailPass = (process.env.EMAIL_PASS || process.env.GMAIL_PASS || '').replace(/\s+/g, '');
+
+  console.log(`📨 [EMAIL DISPATCH INITIATED] Target Recipient: ${targetRecipient} | Configured Sender: ${emailUser || 'None'}`);
+
+  // Provider 1: Gmail Nodemailer (Transports to ANY email address worldwide)
+  if (emailUser && emailPass) {
+    // 1A. Try standard Gmail Service
     try {
-      const res = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.RESEND_API_KEY.trim()}`,
-          'Content-Type': 'application/json'
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: emailUser,
+          pass: emailPass
         },
-        body: JSON.stringify({
-          from: 'AI Chatbot <onboarding@resend.dev>',
-          to: [toEmail],
+        family: 4
+      });
+
+      await transporter.sendMail({
+        from: `"AI Chatbot Security" <${emailUser}>`,
+        to: targetRecipient,
+        subject: subject,
+        text: textContent,
+        html: htmlContent
+      });
+
+      console.log(`✅ [EMAIL DELIVERED via Gmail Service] Recipient: ${targetRecipient}`);
+      return { success: true, provider: 'gmail-service' };
+    } catch (gmailServiceErr) {
+      console.warn(`⚠️ [Gmail Service Transport Notice] Recipient: ${targetRecipient} | Error: ${gmailServiceErr.message}`);
+
+      // 1B. Try explicit Port 465 (SSL IPv4)
+      try {
+        const sslTransporter = nodemailer.createTransport({
+          host: 'smtp.gmail.com',
+          port: 465,
+          secure: true,
+          family: 4,
+          auth: { user: emailUser, pass: emailPass },
+          connectionTimeout: 7000,
+          greetingTimeout: 7000,
+          socketTimeout: 8000
+        });
+
+        await sslTransporter.sendMail({
+          from: `"AI Chatbot Security" <${emailUser}>`,
+          to: targetRecipient,
           subject: subject,
           text: textContent,
           html: htmlContent
-        })
-      });
-      if (res.ok) {
-        return { success: true, provider: 'resend' };
+        });
+
+        console.log(`✅ [EMAIL DELIVERED via Gmail SSL 465] Recipient: ${targetRecipient}`);
+        return { success: true, provider: 'gmail-ssl' };
+      } catch (sslErr) {
+        console.warn(`⚠️ [Gmail SSL 465 Transport Notice] Recipient: ${targetRecipient} | Error: ${sslErr.message}`);
+
+        // 1C. Try explicit Port 587 (TLS IPv4)
+        try {
+          const tlsTransporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            requireTLS: true,
+            family: 4,
+            auth: { user: emailUser, pass: emailPass },
+            connectionTimeout: 7000,
+            greetingTimeout: 7000,
+            socketTimeout: 8000
+          });
+
+          await tlsTransporter.sendMail({
+            from: `"AI Chatbot Security" <${emailUser}>`,
+            to: targetRecipient,
+            subject: subject,
+            text: textContent,
+            html: htmlContent
+          });
+
+          console.log(`✅ [EMAIL DELIVERED via Gmail TLS 587] Recipient: ${targetRecipient}`);
+          return { success: true, provider: 'gmail-tls' };
+        } catch (tlsErr) {
+          console.warn(`⚠️ [Gmail TLS 587 Transport Notice] Recipient: ${targetRecipient} | Error: ${tlsErr.message}`);
+        }
       }
-    } catch (e) {
-      console.warn('Resend API dispatch error:', e.message);
     }
   }
 
-  // 2. Try Brevo HTTPS API (Port 443)
+  // Provider 2: Brevo HTTPS API (Port 443 — works with all recipients)
   if (process.env.BREVO_API_KEY && process.env.BREVO_API_KEY.trim()) {
     try {
       const res = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -226,79 +290,62 @@ async function sendPasswordResetEmail(toEmail, otp) {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          sender: { name: 'AI Chatbot Security', email: process.env.EMAIL_USER || 'no-reply@aichatbot.com' },
-          to: [{ email: toEmail }],
+          sender: { name: 'AI Chatbot Security', email: emailUser || 'no-reply@aichatbot.com' },
+          to: [{ email: targetRecipient }],
           subject: subject,
           textContent: textContent,
           htmlContent: htmlContent
         })
       });
+
       if (res.ok) {
+        console.log(`✅ [EMAIL DELIVERED via Brevo API] Recipient: ${targetRecipient}`);
         return { success: true, provider: 'brevo' };
+      } else {
+        const errData = await res.json();
+        console.warn(`⚠️ [Brevo API Response Notice] Recipient: ${targetRecipient} | Response:`, errData);
       }
-    } catch (e) {
-      console.warn('Brevo API dispatch error:', e.message);
+    } catch (brevoErr) {
+      console.warn(`⚠️ [Brevo API Error] Recipient: ${targetRecipient} | Error: ${brevoErr.message}`);
     }
   }
 
-  // 3. Try Gmail SMTP / Custom Nodemailer (using IPv4)
-  const emailUser = (process.env.EMAIL_USER || process.env.GMAIL_USER || '').trim();
-  const emailPass = (process.env.EMAIL_PASS || process.env.GMAIL_PASS || '').replace(/\s+/g, '');
-
-  if (emailUser && emailPass) {
+  // Provider 3: Resend HTTPS API (Port 443)
+  if (process.env.RESEND_API_KEY && process.env.RESEND_API_KEY.trim()) {
     try {
-      const transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-        family: 4,
-        auth: { user: emailUser, pass: emailPass },
-        connectionTimeout: 6000,
-        greetingTimeout: 6000,
-        socketTimeout: 7000
-      });
-
-      await transporter.sendMail({
-        from: `"AI Chatbot Security" <${emailUser}>`,
-        to: toEmail,
-        subject: subject,
-        text: textContent,
-        html: htmlContent
-      });
-      return { success: true, provider: 'gmail-smtp' };
-    } catch (smtpErr) {
-      console.warn('Gmail SMTP SSL (port 465) failed, trying TLS port 587:', smtpErr.message);
-
-      try {
-        const fallbackTransporter = nodemailer.createTransport({
-          host: 'smtp.gmail.com',
-          port: 587,
-          secure: false,
-          requireTLS: true,
-          family: 4,
-          auth: { user: emailUser, pass: emailPass },
-          connectionTimeout: 6000,
-          greetingTimeout: 6000,
-          socketTimeout: 7000
-        });
-
-        await fallbackTransporter.sendMail({
-          from: `"AI Chatbot Security" <${emailUser}>`,
-          to: toEmail,
+      const fromAddress = (process.env.RESEND_FROM || '').trim() || 'AI Chatbot <onboarding@resend.dev>';
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.RESEND_API_KEY.trim()}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: fromAddress,
+          to: [targetRecipient],
           subject: subject,
           text: textContent,
           html: htmlContent
-        });
-        return { success: true, provider: 'gmail-smtp-tls' };
-      } catch (tlsErr) {
-        console.warn('Gmail SMTP TLS (port 587) failed:', tlsErr.message);
+        })
+      });
+
+      if (res.ok) {
+        console.log(`✅ [EMAIL DELIVERED via Resend API] Recipient: ${targetRecipient}`);
+        return { success: true, provider: 'resend' };
+      } else {
+        const errData = await res.json();
+        console.warn(`⚠️ [Resend API Response Notice] Recipient: ${targetRecipient} | Response:`, errData);
       }
+    } catch (resendErr) {
+      console.warn(`⚠️ [Resend API Error] Recipient: ${targetRecipient} | Error: ${resendErr.message}`);
     }
   }
 
+  console.error(`❌ [ALL EMAIL PROVIDERS FAILED] Recipient: ${targetRecipient} | EMAIL_USER present: ${!!emailUser} | EMAIL_PASS present: ${!!emailPass} | RESEND present: ${!!process.env.RESEND_API_KEY}`);
+
   return {
     success: false,
-    error: 'Email service could not deliver OTP. Please verify EMAIL_USER and EMAIL_PASS (Gmail App Password) or RESEND_API_KEY in your Render environment variables.'
+    error: 'Email delivery failed. Please ensure your EMAIL_USER and EMAIL_PASS (Gmail App Password) are configured in your Render environment variables.'
   };
 }
 
