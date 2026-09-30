@@ -113,13 +113,14 @@
       </div>
 
       <!-- 1. LOGIN FORM -->
-      <form id="login-form" class="auth-form <%= (typeof mode !== 'undefined' && mode === 'signup') ? 'hidden' : '' %>" onsubmit="handleAuthSubmit(event, 'login')">
+      <form id="login-form" class="auth-form <%= (typeof mode !== 'undefined' && mode === 'signup') ? 'hidden' : '' %>" onsubmit="handleLoginSubmit(event)">
         <div class="form-group">
-          <label for="login-email">Email Address</label>
+          <label for="login-identifier">Email or Mobile Number</label>
           <div class="input-wrapper">
-            <i data-lucide="mail" class="input-icon"></i>
-            <input type="email" id="login-email" name="email" placeholder="you@example.com" required autocomplete="email">
+            <i data-lucide="user-check" class="input-icon"></i>
+            <input type="text" id="login-identifier" name="identifier" placeholder="Email or 10-digit mobile" required autocomplete="username">
           </div>
+          <span class="form-hint">Enter your registered email or 10-digit mobile number</span>
         </div>
 
         <div class="form-group">
@@ -145,13 +146,30 @@
       </form>
 
       <!-- 2. SIGNUP FORM -->
-      <form id="signup-form" class="auth-form <%= (typeof mode !== 'undefined' && mode === 'signup') ? '' : 'hidden' %>" onsubmit="handleAuthSubmit(event, 'signup')">
+      <form id="signup-form" class="auth-form <%= (typeof mode !== 'undefined' && mode === 'signup') ? '' : 'hidden' %>" onsubmit="handleSignupSubmit(event)">
+        <div class="form-group">
+          <label for="signup-name">Full Name</label>
+          <div class="input-wrapper">
+            <i data-lucide="user" class="input-icon"></i>
+            <input type="text" id="signup-name" name="name" placeholder="John Doe" required autocomplete="name">
+          </div>
+        </div>
+
         <div class="form-group">
           <label for="signup-email">Email Address</label>
           <div class="input-wrapper">
             <i data-lucide="mail" class="input-icon"></i>
             <input type="email" id="signup-email" name="email" placeholder="you@example.com" required autocomplete="email">
           </div>
+        </div>
+
+        <div class="form-group">
+          <label for="signup-mobile">Mobile Number</label>
+          <div class="input-wrapper">
+            <i data-lucide="phone" class="input-icon"></i>
+            <input type="tel" id="signup-mobile" name="mobileNumber" placeholder="+91 98765 43210" required autocomplete="tel">
+          </div>
+          <span class="form-hint">10-digit Indian mobile number (+91 optional)</span>
         </div>
 
         <div class="form-group">
@@ -166,6 +184,18 @@
           <span class="form-hint">Must be at least 6 characters long</span>
         </div>
 
+        <div class="form-group">
+          <label for="signup-confirm-password">Confirm Password</label>
+          <div class="input-wrapper">
+            <i data-lucide="check-circle" class="input-icon"></i>
+            <input type="password" id="signup-confirm-password" name="confirmPassword" placeholder="Re-enter password" required minlength="6" autocomplete="new-password">
+            <button type="button" class="toggle-pw-btn" onclick="togglePasswordVisibility('signup-confirm-password', this)" aria-label="Toggle password visibility">
+              <i data-lucide="eye"></i>
+            </button>
+          </div>
+          <span class="form-hint">Both passwords must match</span>
+        </div>
+
         <button type="submit" id="signup-submit-btn" class="btn btn-primary btn-block">
           <span class="btn-text">Create Account</span>
           <span class="spinner hidden"></span>
@@ -176,16 +206,16 @@
       <form id="forgot-step1-form" class="auth-form hidden" onsubmit="handleSendOtp(event)">
         <div class="step-badge">Step 1 of 3: Account Recovery</div>
         <div class="form-group">
-          <label for="forgot-email">Enter Registered Email</label>
+          <label for="forgot-email">Enter your registered email address</label>
           <div class="input-wrapper">
             <i data-lucide="mail" class="input-icon"></i>
-            <input type="email" id="forgot-email" placeholder="you@example.com" required>
+            <input type="email" id="forgot-email" placeholder="you@example.com" required autocomplete="email">
           </div>
-          <span class="form-hint">A secure 4-digit verification code will be sent to your email.</span>
+          <span class="form-hint">A secure 6-digit verification code will be sent to your email.</span>
         </div>
 
         <button type="submit" id="send-otp-btn" class="btn btn-primary btn-block">
-          <span class="btn-text">Send 4-Digit OTP to Email</span>
+          <span class="btn-text">Send OTP</span>
           <span class="spinner hidden"></span>
         </button>
 
@@ -196,25 +226,25 @@
         </div>
       </form>
 
-      <!-- 4. FORGOT PASSWORD STEP 2: Verify 4-Digit OTP from Email -->
+      <!-- 4. FORGOT PASSWORD STEP 2: Verify 6-Digit OTP from Email -->
       <form id="forgot-step2-form" class="auth-form hidden" onsubmit="handleVerifyOtp(event)">
-        <div class="step-badge">Step 2 of 3: Enter OTP from Email</div>
+        <div class="step-badge">Step 2 of 3: Enter OTP</div>
         
         <!-- Notice confirming email sent -->
         <div class="email-sent-notice">
           <i data-lucide="mail-check"></i>
           <div>
-            We sent a 4-digit OTP to <strong id="screen-user-email">your email</strong>. Please check your inbox (and spam folder) and enter it below.
+            We sent a 6-digit verification OTP to <strong id="screen-user-email">your email</strong>. Valid for 10 minutes.
           </div>
         </div>
 
         <div class="form-group">
-          <label for="otp-input">Enter 4-Digit OTP</label>
+          <label for="otp-input">Enter OTP</label>
           <div class="input-wrapper">
             <i data-lucide="key-round" class="input-icon"></i>
-            <input type="text" id="otp-input" placeholder="••••" maxlength="4" pattern="\d{4}" required autocomplete="one-time-code" style="letter-spacing: 6px; font-weight: 700; font-size: 18px; text-align: center;">
+            <input type="text" id="otp-input" placeholder="••••••" maxlength="6" pattern="\d{6}" required autocomplete="one-time-code" style="letter-spacing: 6px; font-weight: 700; font-size: 20px; text-align: center;">
           </div>
-          <span class="form-hint">4-digit code is valid for 10 minutes</span>
+          <span class="form-hint">6-digit code is valid for 10 minutes</span>
         </div>
 
         <button type="submit" id="verify-otp-btn" class="btn btn-primary btn-block">
@@ -222,9 +252,9 @@
           <span class="spinner hidden"></span>
         </button>
 
-        <div class="back-btn-wrapper" style="display: flex; justify-content: space-between; align-items: center;">
-          <button type="button" class="back-to-login-btn" onclick="openForgotPassword(event)">
-            <i data-lucide="refresh-cw"></i> Resend OTP
+        <div class="back-btn-wrapper" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <button type="button" id="resend-otp-btn" class="back-to-login-btn" onclick="handleResendOtp(event)">
+            <i data-lucide="refresh-cw"></i> <span id="resend-btn-text">Resend OTP</span>
           </button>
           <button type="button" class="back-to-login-btn" onclick="switchAuthMode('login')">
             <i data-lucide="arrow-left"></i> Back to Log In
@@ -232,7 +262,7 @@
         </div>
       </form>
 
-      <!-- 5. FORGOT PASSWORD STEP 3: Create New Password & Confirm Password (only shown after OTP verified) -->
+      <!-- 5. FORGOT PASSWORD STEP 3: Create New Password -->
       <form id="forgot-step3-form" class="auth-form hidden" onsubmit="handleResetPassword(event)">
         <div class="step-badge">Step 3 of 3: Create New Password</div>
 
@@ -245,6 +275,7 @@
               <i data-lucide="eye"></i>
             </button>
           </div>
+          <span class="form-hint">At least 6 characters</span>
         </div>
 
         <div class="form-group">
@@ -260,7 +291,7 @@
         </div>
 
         <button type="submit" id="reset-pw-btn" class="btn btn-primary btn-block">
-          <span class="btn-text">Save New Password & Log In</span>
+          <span class="btn-text">Reset Password</span>
           <span class="spinner hidden"></span>
         </button>
 
@@ -286,6 +317,8 @@
 
     let recoveryEmail = '';
     let activeResetToken = '';
+    let cooldownTimer = null;
+    let cooldownSecondsRemaining = 0;
 
     // Theme Management
     const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -356,12 +389,40 @@
       document.getElementById('auth-tabs').classList.add('hidden');
       document.getElementById('forgot-step1-form').classList.remove('hidden');
       
-      const loginEmailVal = document.getElementById('login-email').value;
-      if (loginEmailVal) {
-        document.getElementById('forgot-email').value = loginEmailVal;
+      const loginIdVal = document.getElementById('login-identifier')?.value || '';
+      if (loginIdVal && loginIdVal.includes('@')) {
+        document.getElementById('forgot-email').value = loginIdVal;
       }
       document.getElementById('forgot-email').focus();
       lucide.createIcons();
+    }
+
+    function startResendCooldown(seconds = 45) {
+      clearInterval(cooldownTimer);
+      cooldownSecondsRemaining = seconds;
+      const resendBtn = document.getElementById('resend-otp-btn');
+      const resendText = document.getElementById('resend-btn-text');
+
+      if (!resendBtn) return;
+      resendBtn.disabled = true;
+      resendBtn.style.opacity = '0.6';
+      resendBtn.style.cursor = 'not-allowed';
+
+      const updateText = () => {
+        if (cooldownSecondsRemaining > 0) {
+          resendText.textContent = `Resend in ${cooldownSecondsRemaining}s`;
+          cooldownSecondsRemaining--;
+        } else {
+          clearInterval(cooldownTimer);
+          resendText.textContent = 'Resend OTP';
+          resendBtn.disabled = false;
+          resendBtn.style.opacity = '1';
+          resendBtn.style.cursor = 'pointer';
+        }
+      };
+
+      updateText();
+      cooldownTimer = setInterval(updateText, 1000);
     }
 
     // Step 1: Send OTP to Email
@@ -375,11 +436,11 @@
         return;
       }
 
-      setBtnLoading(submitBtn, true);
+      setBtnLoading(submitBtn, true, 'Sending OTP...');
       document.getElementById('auth-alert').classList.add('hidden');
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
 
       try {
         const res = await fetch('/api/auth/forgot-password', {
@@ -402,7 +463,8 @@
           document.getElementById('forgot-step2-form').classList.remove('hidden');
 
           document.getElementById('otp-input').value = '';
-          showAlert(`A 4-digit OTP has been sent to ${email}. Please check your inbox and enter it below!`, 'success');
+          startResendCooldown(45);
+          showAlert(data.message || 'OTP has been sent to your registered email address.', 'success');
           document.getElementById('otp-input').focus();
         }
       } catch (err) {
@@ -416,18 +478,57 @@
       }
     }
 
-    // Step 2: Verify OTP entered by user
+    async function handleResendOtp(e) {
+      if (e) e.preventDefault();
+      const resendBtn = document.getElementById('resend-otp-btn');
+      if (resendBtn.disabled) return;
+
+      if (!recoveryEmail) {
+        openForgotPassword();
+        return;
+      }
+
+      const resendText = document.getElementById('resend-btn-text');
+      resendText.textContent = 'Sending...';
+      resendBtn.disabled = true;
+
+      try {
+        const res = await fetch('/api/auth/forgot-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: recoveryEmail })
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          showAlert(data.error || 'Failed to resend OTP.');
+          resendText.textContent = 'Resend OTP';
+          resendBtn.disabled = false;
+        } else {
+          startResendCooldown(45);
+          showAlert(`New 6-digit OTP sent to ${recoveryEmail}. Please check your inbox.`, 'success');
+          document.getElementById('otp-input').value = '';
+          document.getElementById('otp-input').focus();
+        }
+      } catch (err) {
+        showAlert('Network error: Could not resend OTP.');
+        resendText.textContent = 'Resend OTP';
+        resendBtn.disabled = false;
+      }
+    }
+
+    // Step 2: Verify 6-Digit OTP
     async function handleVerifyOtp(e) {
       e.preventDefault();
       const otp = document.getElementById('otp-input').value.trim();
       const submitBtn = document.getElementById('verify-otp-btn');
 
-      if (!otp || otp.length !== 4) {
-        showAlert('Please enter the 4-digit OTP from your email.');
+      if (!otp || otp.length !== 6 || !/^\d{6}$/.test(otp)) {
+        showAlert('Please enter the valid 6-digit numeric OTP from your email.');
         return;
       }
 
-      setBtnLoading(submitBtn, true);
+      setBtnLoading(submitBtn, true, 'Verifying OTP...');
 
       try {
         const res = await fetch('/api/auth/verify-otp', {
@@ -438,7 +539,7 @@
         const data = await res.json();
 
         if (!res.ok || !data.success) {
-          showAlert(data.error || 'Invalid 4-digit OTP. Please check your email and try again.');
+          showAlert(data.error || 'Invalid OTP. Please check your email and try again.');
         } else {
           activeResetToken = data.resetToken || '';
           hideAllForms();
@@ -454,7 +555,7 @@
       }
     }
 
-    // Step 3: Create New Password & Confirm Password
+    // Step 3: Reset Password
     async function handleResetPassword(e) {
       e.preventDefault();
       const newPassword = document.getElementById('new-password').value;
@@ -467,7 +568,7 @@
       }
 
       if (newPassword !== confirmPassword) {
-        showAlert('New password and confirm password do not match.');
+        showAlert('Passwords do not match.');
         return;
       }
 
@@ -476,7 +577,7 @@
         return;
       }
 
-      setBtnLoading(submitBtn, true);
+      setBtnLoading(submitBtn, true, 'Resetting Password...');
 
       try {
         const res = await fetch('/api/auth/reset-password', {
@@ -494,14 +595,15 @@
         if (!res.ok || !data.success) {
           showAlert(data.error || 'Failed to update password.');
         } else {
-          showAlert('Password updated successfully! Redirecting to login...', 'success');
+          showAlert('Password reset successfully. You can now login with your new password.', 'success');
           setTimeout(() => {
             switchAuthMode('login');
-            document.getElementById('login-email').value = recoveryEmail;
+            const loginId = document.getElementById('login-identifier');
+            if (loginId) loginId.value = recoveryEmail;
             document.getElementById('login-password').value = '';
             document.getElementById('login-password').focus();
-            showAlert('Password reset successful! You can now log in with your new password.', 'success');
-          }, 1000);
+            showAlert('Password reset successfully. You can now login with your new password.', 'success');
+          }, 1200);
         }
       } catch (err) {
         showAlert('Network error. Could not reset password.');
@@ -510,39 +612,33 @@
       }
     }
 
-    // Login & Signup Submission
-    async function handleAuthSubmit(e, mode) {
+    // Login Submission (Email OR Mobile Number)
+    async function handleLoginSubmit(e) {
       e.preventDefault();
-      const submitBtn = document.getElementById(`${mode}-submit-btn`);
-      const email = document.getElementById(`${mode}-email`).value.trim();
-      const password = document.getElementById(`${mode}-password`).value;
+      const submitBtn = document.getElementById('login-submit-btn');
+      const identifier = document.getElementById('login-identifier').value.trim();
+      const password = document.getElementById('login-password').value;
 
-      if (!email || !password) {
-        showAlert('Please fill in all fields.');
+      if (!identifier || !password) {
+        showAlert('Please enter your email/mobile and password.');
         return;
       }
 
-      if (mode === 'signup' && password.length < 6) {
-        showAlert('Password must be at least 6 characters long.');
-        return;
-      }
-
-      setBtnLoading(submitBtn, true);
+      setBtnLoading(submitBtn, true, 'Logging in...');
 
       try {
-        const endpoint = mode === 'signup' ? '/api/auth/signup' : '/api/auth/login';
-        const res = await fetch(endpoint, {
+        const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
+          body: JSON.stringify({ identifier, password })
         });
 
         const data = await res.json();
 
         if (!res.ok || !data.success) {
-          showAlert(data.error || 'Authentication failed. Please try again.');
+          showAlert(data.error || 'Login failed. Please check your credentials.');
         } else {
-          showAlert(mode === 'signup' ? 'Account created! Redirecting...' : 'Success! Redirecting...', 'success');
+          showAlert('Success! Redirecting to chat...', 'success');
           setTimeout(() => {
             window.location.href = '/';
           }, 600);
@@ -554,16 +650,95 @@
       }
     }
 
-    function setBtnLoading(btn, isLoading) {
+    // Signup Submission (Full Name, Email, Indian Mobile, Password, Confirm Password)
+    async function handleSignupSubmit(e) {
+      e.preventDefault();
+      const submitBtn = document.getElementById('signup-submit-btn');
+      const name = document.getElementById('signup-name').value.trim();
+      const email = document.getElementById('signup-email').value.trim();
+      const mobileNumber = document.getElementById('signup-mobile').value.trim();
+      const password = document.getElementById('signup-password').value;
+      const confirmPassword = document.getElementById('signup-confirm-password').value;
+
+      if (!name || !email || !mobileNumber || !password || !confirmPassword) {
+        showAlert('Please fill in all fields.');
+        return;
+      }
+
+      const emailRegex = /^\S+@\S+\.\S+$/;
+      if (!emailRegex.test(email)) {
+        showAlert('Please enter a valid email address.');
+        return;
+      }
+
+      // Check Indian mobile format (+91 optional, 10 digits)
+      const cleanedMobile = mobileNumber.replace(/[\s\-\(\)]/g, '');
+      const validMobile = /^(?:\+91|91|0)?[6-9]\d{9}$/.test(cleanedMobile);
+      if (!validMobile) {
+        showAlert('Please enter a valid 10-digit Indian mobile number (+91 optional).');
+        return;
+      }
+
+      if (password.length < 6) {
+        showAlert('Password must be at least 6 characters long.');
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        showAlert('Passwords do not match.');
+        return;
+      }
+
+      setBtnLoading(submitBtn, true, 'Creating Account...');
+
+      try {
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, mobileNumber, password, confirmPassword })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+          showAlert(data.error || 'Registration failed. Please try again.');
+        } else {
+          showAlert('Account created successfully! Redirecting...', 'success');
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 600);
+        }
+      } catch (err) {
+        showAlert('Network error. Could not connect to the server.');
+      } finally {
+        setBtnLoading(submitBtn, false);
+      }
+    }
+
+    function setBtnLoading(btn, isLoading, loadingText = '') {
+      if (!btn) return;
       const btnText = btn.querySelector('.btn-text');
       const spinner = btn.querySelector('.spinner');
       btn.disabled = isLoading;
       if (isLoading) {
-        btnText.classList.add('hidden');
-        spinner.classList.remove('hidden');
+        if (loadingText && btnText) {
+          btnText.textContent = loadingText;
+          btnText.classList.remove('hidden');
+        } else if (btnText) {
+          btnText.classList.add('hidden');
+        }
+        if (spinner) spinner.classList.remove('hidden');
       } else {
-        btnText.classList.remove('hidden');
-        spinner.classList.add('hidden');
+        if (spinner) spinner.classList.add('hidden');
+        if (btnText) {
+          btnText.classList.remove('hidden');
+          // Restore default button text based on button ID
+          if (btn.id === 'login-submit-btn') btnText.textContent = 'Log In';
+          if (btn.id === 'signup-submit-btn') btnText.textContent = 'Create Account';
+          if (btn.id === 'send-otp-btn') btnText.textContent = 'Send OTP';
+          if (btn.id === 'verify-otp-btn') btnText.textContent = 'Verify OTP';
+          if (btn.id === 'reset-pw-btn') btnText.textContent = 'Reset Password';
+        }
       }
     }
 

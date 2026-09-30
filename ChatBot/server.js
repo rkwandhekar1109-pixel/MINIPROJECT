@@ -1,12 +1,16 @@
 require('dotenv').config();
 const dns = require('dns');
 
-// Force IPv4 DNS resolution for cloud servers (e.g. Render)
+// Force IPv4 and configure reliable public DNS servers (Google & Cloudflare)
+// to resolve MongoDB Atlas SRV records and prevent querySrv ECONNREFUSED on cloud providers like Render.
 try {
   if (dns.setDefaultResultOrder) {
     dns.setDefaultResultOrder('ipv4first');
   }
-} catch (e) {}
+  dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
+} catch (dnsErr) {
+  console.warn('⚠️ Could not configure custom DNS servers:', dnsErr.message);
+}
 
 const express = require('express');
 const mongoose = require('mongoose');
@@ -35,36 +39,62 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
 // ================= MONGODB =================
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/chatbot';
+const rawMongoUri = (process.env.MONGO_URI || process.env.MONGODB_URI || '').trim();
+let mongoUri = rawMongoUri;
+
+if (!mongoUri) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('❌ FATAL: MONGO_URI is not set in Render Environment Variables.');
+  } else {
+    mongoUri = 'mongodb://127.0.0.1:27017/chatbotDB';
+    console.log('ℹ️ No MONGO_URI provided. Defaulting to local MongoDB for development.');
+  }
+}
+
+// Mask sensitive credentials when logging
+const maskedUri = mongoUri ? mongoUri.replace(/\/\/[^@]+@/, '//***:***@') : 'None';
+console.log(`Connecting to MongoDB: ${maskedUri}`);
 
 const mongooseOptions = {
-  serverSelectionTimeoutMS: 5000,
-  connectTimeoutMS: 5000,
-  socketTimeoutMS: 10000,
+  serverSelectionTimeoutMS: 10000,
+  connectTimeoutMS: 10000,
+  socketTimeoutMS: 20000,
   family: 4
 };
 
-mongoose.connect(MONGO_URI, mongooseOptions)
-  .then(async () => {
-    console.log('✅ MongoDB Connected');
-    try {
-      // Clean up legacy non-email unique indexes on 'users' collection to ensure multi-user creation never collides
-      const usersCollection = mongoose.connection.collection('users');
-      const indexes = await usersCollection.indexes();
-      for (const idx of indexes) {
-        if (idx.name !== '_id_' && idx.name !== 'email_1' && idx.unique) {
-          console.log(`🔧 Dropping legacy unique index: ${idx.name}`);
-          await usersCollection.dropIndex(idx.name);
+if (mongoUri) {
+  mongoose.connect(mongoUri, mongooseOptions)
+    .then(async () => {
+      console.log('✅ MongoDB Connected');
+      try {
+        // Clean up legacy conflicting unique indexes (e.g. username_1) while preserving email_1 and mobileNumber_1
+        const usersCollection = mongoose.connection.collection('users');
+        const indexes = await usersCollection.indexes();
+        for (const idx of indexes) {
+          if (idx.name !== '_id_' && idx.name !== 'email_1' && idx.name !== 'mobileNumber_1' && idx.unique) {
+            console.log(`🔧 Dropping legacy unique index: ${idx.name}`);
+            await usersCollection.dropIndex(idx.name);
+          }
         }
+      } catch (idxErr) {
+        // Collection may be new or clean
       }
-    } catch (idxErr) {
-      // Collection may be new or clean
-    }
-  })
-  .catch((err) => {
-    console.error('❌ MongoDB Connection Error:', err.message);
-    console.log('⚠️ Please ensure MongoDB is running or MONGO_URI is set in Render Environment.');
-  });
+    })
+    .catch((err) => {
+      console.error('❌ MongoDB Connection Error:', err.message);
+      console.log('⚠️ Please ensure MongoDB Atlas IP Access List allows 0.0.0.0/0 and MONGO_URI is set correctly in Render.');
+    });
+}
+
+// Database availability guard: do not process API auth requests if DB is disconnected
+app.use('/api', (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      error: 'Database is currently connecting or unavailable. Please retry in a moment.'
+    });
+  }
+  next();
+});
 
 // ================= ROUTES =================
 // Auth routes (/login, /signup, /api/auth/*)
@@ -93,7 +123,7 @@ app.use((err, req, res, next) => {
 });
 
 // ================= START SERVER =================
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);

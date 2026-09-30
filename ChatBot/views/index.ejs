@@ -59,11 +59,11 @@
       <div class="sidebar-footer">
         <div class="user-profile">
           <div class="user-avatar" id="user-avatar-initial">
-            <%= (user && user.email) ? user.email.charAt(0).toUpperCase() : 'U' %>
+            <%= (user && (user.name || user.email)) ? (user.name || user.email).charAt(0).toUpperCase() : 'U' %>
           </div>
           <div class="user-info">
-            <span class="user-email" id="user-email-display" title="<%= user ? user.email : '' %>">
-              <%= user ? user.email : 'User' %>
+            <span class="user-email" id="user-email-display" title="<%= user ? (user.name ? user.name + ' (' + user.email + ')' : user.email) : '' %>">
+              <%= user ? (user.name || user.email) : 'User' %>
             </span>
           </div>
         </div>

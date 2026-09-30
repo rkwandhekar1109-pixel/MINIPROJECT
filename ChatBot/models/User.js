@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    trim: true,
+    default: ''
+  },
   email: {
     type: String,
     required: [true, 'Email is required'],
@@ -8,6 +13,13 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     trim: true,
     match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email address']
+  },
+  mobileNumber: {
+    type: String,
+    required: [function() { return !!(this && this.isNew); }, 'Mobile number is required'],
+    unique: true,
+    sparse: true,
+    trim: true
   },
   password: {
     type: String,
@@ -27,6 +39,14 @@ const userSchema = new mongoose.Schema({
     default: 0
   },
   lastOtpSentAt: {
+    type: Date,
+    default: null
+  },
+  resetPasswordToken: {
+    type: String,
+    default: null
+  },
+  resetPasswordTokenExpires: {
     type: Date,
     default: null
   },

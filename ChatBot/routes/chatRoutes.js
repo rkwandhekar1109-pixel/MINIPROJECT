@@ -6,6 +6,7 @@ const multer = require('multer');
 const { GoogleGenAI } = require('@google/genai');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const OpenAI = require('openai');
+const Groq = require('groq-sdk');
 
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
@@ -56,99 +57,245 @@ const upload = multer({
   fileFilter: fileFilter
 });
 
-// Helper for Gemini AI Completion with strict fast timeouts
-async function callGeminiAI(userMsg, uploadedFile) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey.trim() === '') {
-    return '⚠️ GEMINI_API_KEY is not configured in your server environment variables. Please add your GEMINI_API_KEY in your Render dashboard (Settings > Environment).';
+// Dynamic model cache for Gemini (1 hour TTL)
+let cachedGeminiModels = null;
+let lastModelFetchTime = 0;
+
+async function getAvailableGeminiModels(apiKey) {
+  const now = Date.now();
+  if (cachedGeminiModels && cachedGeminiModels.length > 0 && (now - lastModelFetchTime < 3600000)) {
+    return cachedGeminiModels;
   }
 
+  const configuredModel = (process.env.GEMINI_MODEL || '').trim();
+
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.models)) {
+        const supported = data.models
+          .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+          .map(m => m.name.replace(/^models\//, ''));
+
+        if (supported.length > 0) {
+          const scoreModel = (name) => {
+            const n = name.toLowerCase();
+            if (configuredModel && n === configuredModel.toLowerCase()) return 1000;
+            if (n.includes('3.8-flash')) return 500;
+            if (n.includes('3.5-flash-lite')) return 450;
+            if (n.includes('3.5-flash')) return 400;
+            if (n.includes('2.5-flash')) return 300;
+            if (n.includes('2.0-flash')) return 200;
+            if (n.includes('flash')) return 100;
+            if (n.includes('pro')) return 50;
+            return 10;
+          };
+
+          supported.sort((a, b) => scoreModel(b) - scoreModel(a));
+
+          const topCandidates = supported.slice(0, 5);
+          if (configuredModel && !topCandidates.includes(configuredModel)) {
+            topCandidates.unshift(configuredModel);
+          }
+
+          cachedGeminiModels = topCandidates;
+          lastModelFetchTime = now;
+          return topCandidates;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Gemini dynamic model lookup notice:', err.message);
+  }
+
+  // Active modern defaults (excluding retired models like gemini-1.5-pro / gemini-1.5-flash)
+  const defaults = [
+    configuredModel,
+    'gemini-3.8-flash',
+    'gemini-3.5-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash'
+  ].filter(Boolean);
+
+  return [...new Set(defaults)];
+}
+
+// Helper for Gemini AI Completion with dynamic model discovery, multi-tier execution, and fallback
+async function callGeminiAI(userMsg, uploadedFile) {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
   const promptText = userMsg || 'Please analyze this image.';
   let lastError = null;
 
-  // Active official Google Gemini models
-  const candidateModels = [
-    process.env.GEMINI_MODEL,
-    'gemini-2.5-flash',
-    'gemini-2.0-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro'
-  ].filter(Boolean);
+  if (apiKey) {
+    // Dynamically resolve active, valid models supported by this API key
+    const candidateModels = await getAvailableGeminiModels(apiKey);
 
-  // Helper with 10-second timeout per attempt
-  const timeoutPromise = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini API timeout')), ms));
+    // Timeout helper (8 seconds per candidate)
+    const timeoutPromise = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error('Gemini API timeout')), ms));
 
-  // 1. Try using @google/genai SDK
-  for (const modelName of candidateModels) {
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      
-      let contents;
-      if (uploadedFile && fs.existsSync(uploadedFile.path)) {
+    // Read upload buffer if provided
+    let imageBase64 = null;
+    if (uploadedFile && fs.existsSync(uploadedFile.path)) {
+      try {
         const fileBuffer = fs.readFileSync(uploadedFile.path);
-        const base64Data = Buffer.from(fileBuffer).toString('base64');
-        contents = [
+        imageBase64 = Buffer.from(fileBuffer).toString('base64');
+      } catch (e) {
+        console.warn('Could not read uploaded image buffer:', e.message);
+      }
+    }
+
+    // Attempt each candidate model
+    for (const modelName of candidateModels) {
+      // Tier 1: Try GoogleGenAI (@google/genai)
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const contents = imageBase64 ? [
           { text: promptText },
           {
             inlineData: {
               mimeType: uploadedFile.mimetype,
-              data: base64Data
+              data: imageBase64
             }
           }
-        ];
-      } else {
-        contents = promptText;
+        ] : promptText;
+
+        const generatePromise = ai.models.generateContent({
+          model: modelName,
+          contents: contents
+        });
+
+        const response = await Promise.race([generatePromise, timeoutPromise(8000)]);
+        if (response && response.text) {
+          return response.text;
+        }
+      } catch (sdkErr) {
+        console.warn(`@google/genai attempt on [${modelName}] notice:`, sdkErr.message);
+        lastError = sdkErr;
       }
 
-      const generatePromise = ai.models.generateContent({
-        model: modelName,
-        contents: contents
-      });
+      // Tier 2: Try Direct Google REST API (fastest, zero SDK mismatch risk)
+      try {
+        const restParts = [{ text: promptText }];
+        if (imageBase64) {
+          restParts.push({
+            inline_data: {
+              mime_type: uploadedFile.mimetype,
+              data: imageBase64
+            }
+          });
+        }
 
-      const response = await Promise.race([generatePromise, timeoutPromise(9000)]);
-
-      if (response && response.text) {
-        return response.text;
-      }
-    } catch (sdkError) {
-      console.warn(`@google/genai attempt on ${modelName} notice:`, sdkError.message);
-      lastError = sdkError;
-    }
-  }
-
-  // 2. Fallback to @google/generative-ai SDK
-  for (const modelName of candidateModels) {
-    try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: modelName });
-
-      let generatePromise;
-      if (uploadedFile && fs.existsSync(uploadedFile.path)) {
-        const fileBuffer = fs.readFileSync(uploadedFile.path);
-        const imagePart = {
-          inlineData: {
-            data: Buffer.from(fileBuffer).toString('base64'),
-            mimeType: uploadedFile.mimetype
+        const restRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: restParts }] }),
+            signal: AbortSignal.timeout(8000)
           }
-        };
-        generatePromise = model.generateContent([promptText, imagePart]);
-      } else {
-        generatePromise = model.generateContent(promptText);
+        );
+
+        if (restRes.ok) {
+          const data = await restRes.json();
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) {
+            return text;
+          }
+        } else {
+          const errJson = await restRes.json().catch(() => null);
+          const errMsg = errJson?.error?.message || `HTTP ${restRes.status}`;
+          console.warn(`Direct REST attempt on [${modelName}] notice:`, errMsg);
+          lastError = new Error(errMsg);
+        }
+      } catch (restErr) {
+        console.warn(`Direct REST call on [${modelName}] notice:`, restErr.message);
+        lastError = restErr;
       }
 
-      const result = await Promise.race([generatePromise, timeoutPromise(9000)]);
-      const response = await result.response;
-      const text = response.text();
-      if (text) {
-        return text;
+      // Tier 3: Fallback to @google/generative-ai SDK
+      try {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: modelName });
+
+        let generatePromise;
+        if (imageBase64) {
+          const imagePart = {
+            inlineData: {
+              data: imageBase64,
+              mimeType: uploadedFile.mimetype
+            }
+          };
+          generatePromise = model.generateContent([promptText, imagePart]);
+        } else {
+          generatePromise = model.generateContent(promptText);
+        }
+
+        const result = await Promise.race([generatePromise, timeoutPromise(8000)]);
+        const response = await result.response;
+        const text = response.text();
+        if (text) {
+          return text;
+        }
+      } catch (legacyErr) {
+        console.warn(`@google/generative-ai attempt on [${modelName}] notice:`, legacyErr.message);
+        lastError = legacyErr;
       }
-    } catch (altError) {
-      console.warn(`@google/generative-ai attempt on ${modelName} notice:`, altError.message);
-      lastError = altError;
     }
   }
 
-  return `⚠️ Unable to reach Gemini AI (${lastError ? lastError.message : 'Timeout'}). Please verify your GEMINI_API_KEY in Render.`;
+  // Tier 4: Auto-fallback to Groq if GROQ_API_KEY is configured in Render
+  if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.trim()) {
+    try {
+      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY.trim() });
+      const completion = await groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role: 'user', content: promptText }]
+      });
+      const groqText = completion.choices?.[0]?.message?.content;
+      if (groqText) {
+        return groqText;
+      }
+    } catch (groqErr) {
+      console.warn('Groq AI fallback notice:', groqErr.message);
+    }
+  }
+
+  // Tier 5: Auto-fallback to OpenAI if OPENAI_API_KEY is configured in Render
+  if (process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim()) {
+    try {
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY.trim() });
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: promptText }]
+      });
+      const openaiText = completion.choices?.[0]?.message?.content;
+      if (openaiText) {
+        return openaiText;
+      }
+    } catch (openaiErr) {
+      console.warn('OpenAI fallback notice:', openaiErr.message);
+    }
+  }
+
+  if (!apiKey) {
+    return '⚠️ GEMINI_API_KEY is not configured in your server environment variables. Please add your GEMINI_API_KEY in your Render dashboard (Settings > Environment).';
+  }
+
+  // Clear, helpful diagnostic response
+  const rawMsg = lastError ? lastError.message : 'Request timed out';
+  if (/api_?key.*invalid/i.test(rawMsg)) {
+    return '⚠️ Invalid GEMINI_API_KEY. Please verify or regenerate your Gemini API key in Google AI Studio (https://aistudio.google.com/apikey) and update it in your Render Environment variables.';
+  }
+  if (/quota|resource_exhausted|rate/i.test(rawMsg)) {
+    return '⚠️ Gemini API quota limit reached. You can add a GROQ_API_KEY in Render Environment as an instant fallback, or check your quota in Google AI Studio.';
+  }
+
+  return `⚠️ Unable to reach Gemini AI (${rawMsg}). You can set GEMINI_MODEL (e.g. gemini-3.8-flash) or check your GEMINI_API_KEY in Render.`;
 }
 
 // ==========================================
