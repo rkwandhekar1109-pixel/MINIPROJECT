@@ -321,9 +321,9 @@ async function sendPasswordResetEmail(toEmail, otp) {
             user: emailUser,
             pass: emailPass
           },
-          connectionTimeout: 8000,
-          greetingTimeout: 8000,
-          socketTimeout: 10000
+          connectionTimeout: 10000,
+          greetingTimeout: 10000,
+          socketTimeout: 12000
         });
 
         await gmailTransporter.sendMail({
@@ -339,7 +339,9 @@ async function sendPasswordResetEmail(toEmail, otp) {
       } catch (gmailErr) {
         console.warn(`⚠️ [Gmail SMTP Error]:`, gmailErr.message);
         if (gmailErr.message && (gmailErr.message.includes('535') || gmailErr.message.includes('BadCredentials') || gmailErr.message.includes('Username and Password not accepted'))) {
-          lastErrorMsg = 'Gmail authentication failed (BadCredentials). Please verify that EMAIL_USER is your Gmail address and EMAIL_PASSWORD is an active 16-character Google App Password (not your regular Gmail password). Ensure 2-Step Verification is turned ON in Google Account security.';
+          lastErrorMsg = 'Gmail authentication failed (535 BadCredentials). Please verify that EMAIL_USER is your Gmail address and EMAIL_PASSWORD is an active 16-character Google App Password (not your regular Gmail password). Ensure 2-Step Verification is turned ON in Google Account security.';
+        } else if (gmailErr.code === 'ETIMEDOUT' || gmailErr.code === 'ECONNREFUSED' || (gmailErr.message && gmailErr.message.includes('timeout'))) {
+          lastErrorMsg = 'Outbound connection to Gmail SMTP timed out. Render blocks outbound SMTP ports (465, 587) on free plans. Configure a free BREVO_API_KEY (Port 443) in Render to bypass port restrictions.';
         } else {
           lastErrorMsg = `Gmail SMTP error: ${gmailErr.message}`;
         }
@@ -417,15 +419,15 @@ async function sendPasswordResetEmail(toEmail, otp) {
     };
   };
 
-  // Enforce strict 7.5-second total timeout
+  // Enforce 14-second total timeout
   try {
     const timeoutPromise = new Promise((resolve) => {
       setTimeout(() => {
         resolve({
           success: false,
-          error: 'Email delivery timed out. Please verify your email configuration in Render.'
+          error: 'Email delivery timed out. Please verify your email configuration in Render (or configure BREVO_API_KEY to send via HTTPS Port 443).'
         });
-      }, 7500);
+      }, 14000);
     });
 
     return await Promise.race([executeDispatch(), timeoutPromise]);
